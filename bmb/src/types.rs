@@ -335,6 +335,22 @@ fn get_operand_types(a: &Operand, b: &Operand, env: &TypeEnv) -> Result<(Type, T
     Ok((get_operand_type(a, env)?, get_operand_type(b, env)?))
 }
 
+/// Determine the common type for comparison, with literal promotion
+/// Returns Some(unified_type) if types are compatible, None otherwise
+fn unified_comparison_type(left: &Type, right: &Type) -> Option<Type> {
+    if left == right {
+        return Some(left.clone());
+    }
+
+    // Integer promotion: i32 can be promoted to i64
+    match (left, right) {
+        (Type::I32, Type::I64) | (Type::I64, Type::I32) => Some(Type::I64),
+        // Float promotion: f32 can be compared with f64 (f32 promoted to f64)
+        (Type::F32, Type::F64) | (Type::F64, Type::F32) => Some(Type::F64),
+        _ => None,
+    }
+}
+
 fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type> {
     match expr {
         Expr::Binary { left, op, right } => {
@@ -343,15 +359,17 @@ fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type> {
 
             match op {
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    if left_type != right_type {
-                        return Err(BmbError::TypeError {
+                    // Arithmetic: try promotion for contracts, strict match otherwise
+                    if let Some(unified) = unified_comparison_type(&left_type, &right_type) {
+                        Ok(unified)
+                    } else {
+                        Err(BmbError::TypeError {
                             message: format!(
                                 "Arithmetic type mismatch: {} vs {}",
                                 left_type, right_type
                             ),
-                        });
+                        })
                     }
-                    Ok(left_type)
                 }
                 BinaryOp::Eq
                 | BinaryOp::Ne
@@ -359,15 +377,17 @@ fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type> {
                 | BinaryOp::Le
                 | BinaryOp::Gt
                 | BinaryOp::Ge => {
-                    if left_type != right_type {
-                        return Err(BmbError::TypeError {
+                    // Comparison: allow type promotion (i32 <-> i64, f32 <-> f64)
+                    if unified_comparison_type(&left_type, &right_type).is_some() {
+                        Ok(Type::Bool)
+                    } else {
+                        Err(BmbError::TypeError {
                             message: format!(
                                 "Comparison type mismatch: {} vs {}",
                                 left_type, right_type
                             ),
-                        });
+                        })
                     }
-                    Ok(Type::Bool)
                 }
                 BinaryOp::And | BinaryOp::Or => {
                     if left_type != Type::Bool || right_type != Type::Bool {

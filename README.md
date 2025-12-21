@@ -69,7 +69,7 @@ BMB's strict, unambiguous grammar makes it inherently suitable for LLM-based cod
 
 ## Documentation
 
-* [SPECIFICATION.md](https://www.google.com/search?q=docs/SPECIFICATION.md) - The rules of engagement.
+* [SPECIFICATION.md](docs/SPECIFICATION.md) - The rules of engagement.
 
 ---
 

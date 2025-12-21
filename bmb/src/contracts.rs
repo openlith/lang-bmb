@@ -168,14 +168,48 @@ impl<'a> ContractCodeGenerator<'a> {
         func.instruction(&Instruction::End);
     }
 
-    /// Generate expression evaluation code
-    fn generate_expr(&self, expr: &Expr, func: &mut Function) {
+    /// Determine the unified type for a binary expression
+    /// Returns the "larger" type when promotion is possible
+    fn infer_unified_binary_type(&self, left: &Expr, right: &Expr) -> Type {
+        let left_type = self.infer_expr_type(left);
+        let right_type = self.infer_expr_type(right);
+
+        if left_type == right_type {
+            return left_type;
+        }
+
+        // Type promotion rules
+        match (&left_type, &right_type) {
+            // i32 promotes to i64
+            (Type::I32, Type::I64) | (Type::I64, Type::I32) => Type::I64,
+            // f32 promotes to f64
+            (Type::F32, Type::F64) | (Type::F64, Type::F32) => Type::F64,
+            // Default to left type
+            _ => left_type,
+        }
+    }
+
+    /// Generate expression evaluation code with optional target type for promotion
+    fn generate_expr_with_type(
+        &self,
+        expr: &Expr,
+        target_type: Option<&Type>,
+        func: &mut Function,
+    ) {
         match expr {
             Expr::IntLit(v) => {
-                func.instruction(&Instruction::I32Const(*v as i32));
+                // Generate literal with target type if specified
+                match target_type {
+                    Some(Type::I64) => func.instruction(&Instruction::I64Const(*v)),
+                    _ => func.instruction(&Instruction::I32Const(*v as i32)),
+                };
             }
             Expr::FloatLit(v) => {
-                func.instruction(&Instruction::F64Const(*v));
+                // Generate literal with target type if specified
+                match target_type {
+                    Some(Type::F32) => func.instruction(&Instruction::F32Const(*v as f32)),
+                    _ => func.instruction(&Instruction::F64Const(*v)),
+                };
             }
             Expr::BoolLit(b) => {
                 func.instruction(&Instruction::I32Const(if *b { 1 } else { 0 }));
@@ -183,21 +217,30 @@ impl<'a> ContractCodeGenerator<'a> {
             Expr::Var(name) => {
                 if let Some(&idx) = self.locals.get(&name.name) {
                     func.instruction(&Instruction::LocalGet(idx));
+                    // Handle type promotion if needed
+                    if let Some(target) = target_type {
+                        let actual_type = self.types.get(&name.name).cloned().unwrap_or(Type::I32);
+                        self.maybe_convert_type(&actual_type, target, func);
+                    }
                 }
             }
             Expr::Ret => {
                 // Load the return value from result_local
                 if let Some(idx) = self.result_local {
                     func.instruction(&Instruction::LocalGet(idx));
+                    // Handle type promotion if needed
+                    if let Some(target) = target_type {
+                        self.maybe_convert_type(&self.return_type, target, func);
+                    }
                 }
             }
             Expr::Binary { op, left, right } => {
-                // Evaluate operands
-                self.generate_expr(left, func);
-                self.generate_expr(right, func);
+                // Determine unified type for operands
+                let operand_type = self.infer_unified_binary_type(left, right);
 
-                // Determine operand type for choosing the right instruction
-                let operand_type = self.infer_expr_type(left);
+                // Evaluate operands with the unified type
+                self.generate_expr_with_type(left, Some(&operand_type), func);
+                self.generate_expr_with_type(right, Some(&operand_type), func);
 
                 // Generate operation
                 let instr = match op {
@@ -272,7 +315,7 @@ impl<'a> ContractCodeGenerator<'a> {
                 func.instruction(&instr);
             }
             Expr::Unary { op, operand } => {
-                self.generate_expr(operand, func);
+                self.generate_expr_with_type(operand, target_type, func);
                 match op {
                     UnaryOp::Neg => {
                         let operand_type = self.infer_expr_type(operand);
@@ -300,6 +343,31 @@ impl<'a> ContractCodeGenerator<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// Generate expression evaluation code (convenience wrapper)
+    fn generate_expr(&self, expr: &Expr, func: &mut Function) {
+        self.generate_expr_with_type(expr, None, func);
+    }
+
+    /// Generate type conversion instructions if needed
+    fn maybe_convert_type(&self, from: &Type, to: &Type, func: &mut Function) {
+        if from == to {
+            return;
+        }
+
+        match (from, to) {
+            // i32 -> i64 (extend signed)
+            (Type::I32, Type::I64) => {
+                func.instruction(&Instruction::I64ExtendI32S);
+            }
+            // f32 -> f64 (promote)
+            (Type::F32, Type::F64) => {
+                func.instruction(&Instruction::F64PromoteF32);
+            }
+            // No other conversions needed for current type system
+            _ => {}
         }
     }
 

@@ -652,13 +652,14 @@ fn test_execute_f32_operations() {
 #[test]
 fn test_execute_i64_with_contract() {
     let source = r#"
-# i64 multiplication with postcondition
-# Note: Literal type inference doesn't yet promote literals to match operand types
-# So we use a postcondition that compares i64 values
+# i64 multiplication with precondition and postcondition
+# Type promotion allows comparing i64 with i32 literals
 @node safe_mul64
 @params a:i64 b:i64
 @returns i64
-@pre true
+@pre a >= 0
+@pre b >= 0
+@post ret >= 0
 @post ret == a * b
 
   mul %r a b
@@ -687,18 +688,21 @@ fn test_execute_i64_with_contract() {
         .call(&mut store, (1_000_000, 1_000_000))
         .expect("call failed");
     assert_eq!(result, 1_000_000_000_000);
+
+    // Test: precondition violation (negative value) should trap
+    let result = safe_mul64.call(&mut store, (-1, 100));
+    assert!(result.is_err(), "should trap on precondition violation");
 }
 
 #[test]
 fn test_execute_f32_division() {
     let source = r#"
-# f32 division
-# Note: Literal type inference doesn't yet promote 0.0 (f64) to f32
+# f32 division with precondition
+# Type promotion allows comparing f32 with f64 literal (0.0)
 @node divide32
 @params a:f32 b:f32
 @returns f32
-@pre true
-@post true
+@pre b != 0.0
 
   div %r a b
   ret %r
@@ -716,9 +720,7 @@ fn test_execute_f32_division() {
         .expect("divide32 function not found");
 
     // Test: valid division
-    let result = divide32
-        .call(&mut store, (10.0, 4.0))
-        .expect("call failed");
+    let result = divide32.call(&mut store, (10.0, 4.0)).expect("call failed");
     assert!((result - 2.5).abs() < 1e-5);
 
     // Test: negative result
@@ -726,4 +728,8 @@ fn test_execute_f32_division() {
         .call(&mut store, (-15.0, 3.0))
         .expect("call failed");
     assert!((result - (-5.0)).abs() < 1e-5);
+
+    // Test: precondition violation (divide by zero) should trap
+    let result = divide32.call(&mut store, (10.0, 0.0));
+    assert!(result.is_err(), "should trap on precondition violation");
 }
