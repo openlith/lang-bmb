@@ -2,10 +2,12 @@
 name = "bmb"
 version = "0.2.0"
 edition = "2021"
-description = "BMB (Bare-Metal-Banter) - A high-precision contract-first programming language"
+rust-version = "1.75"
+description = "BMB (Bare-Metal-Banter) - A high-precision contract-first programming language targeting WebAssembly"
 license = "MIT"
 authors = ["AILL Project"]
 repository = "https://github.com/openlith/bmb"
+publish = false
 
 [dependencies]
 # Parser - PEG-based parsing
