@@ -21,6 +21,7 @@ pub mod contracts;
 pub mod error;
 pub mod fmt;
 pub mod grammar;
+pub mod ir;
 pub mod lint;
 pub mod modules;
 pub mod optimize;
