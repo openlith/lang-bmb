@@ -1,0 +1,42 @@
+# BMB Grammar - GBNF (llama.cpp compatible)
+# Version: 0.1.0
+# "Omission is guessing, and guessing is error."
+
+root ::= program
+
+program ::= node *
+node ::= "@node" IDENT params returns contracts body
+params ::= "@params" param *
+param ::= IDENT ":" type_name
+returns ::= "@returns" type_name
+contracts ::= (pre | post) *
+pre ::= "@pre" expr
+post ::= "@post" expr
+body ::= (label | stmt) +
+label ::= "_" (ALPHA | DIGIT | "_") + ":"
+stmt ::= opcode operand *
+opcode ::= "add" | "sub" | "mul" | "div" | "mod" | "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "ret" | "jmp" | "jif" | "call" | "mov" | "load" | "store"
+operand ::= register | label_ref | float_literal | int_literal | IDENT
+register ::= "%" (ALPHA | DIGIT | "_") +
+label_ref ::= "_" (ALPHA | DIGIT | "_") +
+type_name ::= "i32" | "i64" | "f32" | "f64" | "bool"
+expr ::= or_expr
+or_expr ::= and_expr ("||" and_expr) *
+and_expr ::= comparison ("&&" comparison) *
+comparison ::= term (comp_op term) ?
+comp_op ::= "==" | "!=" | "<=" | ">=" | "<" | ">"
+term ::= factor ((' +' | "-") factor) *
+factor ::= unary ((' *' | "/" | "%") unary) *
+unary ::= ("!" | "-") ? primary
+primary ::= "(" expr ")" | float_literal | int_literal | bool_literal | "ret" | IDENT
+float_literal ::= "-" ? DIGIT + "." DIGIT +
+int_literal ::= "-" ? DIGIT +
+bool_literal ::= "true" | "false"
+IDENT ::= ALPHA (ALPHA | DIGIT | "_") *
+ALPHA ::= [a-zA-Z]
+DIGIT ::= [0-9]
+WHITESPACE ::= " " | "\t" | "\r" | "\n"
+COMMENT ::= "#" (!NEWLINE ANY) *
+
+# Implicit whitespace
+ws ::= [ \t\r\n]*

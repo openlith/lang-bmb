@@ -1,0 +1,8 @@
+@node sum
+@params a:i32 b:i32
+@returns i32
+@pre true
+@post ret >= a || ret >= b
+
+  add %r a b
+  ret %r

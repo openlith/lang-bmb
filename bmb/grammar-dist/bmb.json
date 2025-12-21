@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ALPHA": {
+      "definition": "[a-zA-Z]",
+      "description": "Alphabetic character"
+    },
+    "COMMENT": {
+      "definition": "'#' (!NEWLINE ANY)*",
+      "description": "Comment (to end of line)"
+    },
+    "DIGIT": {
+      "definition": "[0-9]",
+      "description": "Numeric digit"
+    },
+    "IDENT": {
+      "definition": "ALPHA (ALPHA | DIGIT | '_')*",
+      "description": "Identifier (not starting with underscore)"
+    },
+    "WHITESPACE": {
+      "definition": "' ' | '\\t' | '\\r' | '\\n'",
+      "description": "Whitespace (ignored)"
+    },
+    "and_expr": {
+      "definition": "comparison ('&&' comparison)*",
+      "description": "Logical AND expression"
+    },
+    "body": {
+      "definition": "(label | stmt)+",
+      "description": "Function body with labels and statements"
+    },
+    "bool_literal": {
+      "definition": "'true' | 'false'",
+      "description": "Boolean literal"
+    },
+    "comp_op": {
+      "definition": "'==' | '!=' | '<=' | '>=' | '<' | '>'",
+      "description": "Comparison operators"
+    },
+    "comparison": {
+      "definition": "term (comp_op term)?",
+      "description": "Comparison expression"
+    },
+    "contracts": {
+      "definition": "(pre | post)*",
+      "description": "Pre and post condition contracts"
+    },
+    "expr": {
+      "definition": "or_expr",
+      "description": "Contract expression"
+    },
+    "factor": {
+      "definition": "unary (('*' | '/' | '%') unary)*",
+      "description": "Multiplicative factor"
+    },
+    "float_literal": {
+      "definition": "'-'? DIGIT+ '.' DIGIT+",
+      "description": "Floating-point literal"
+    },
+    "int_literal": {
+      "definition": "'-'? DIGIT+",
+      "description": "Integer literal"
+    },
+    "label": {
+      "definition": "'_' (ALPHA | DIGIT | '_')+ ':'",
+      "description": "Label for jump targets"
+    },
+    "label_ref": {
+      "definition": "'_' (ALPHA | DIGIT | '_')+",
+      "description": "Label reference (without colon)"
+    },
+    "node": {
+      "definition": "'@node' IDENT params returns contracts body",
+      "description": "A node (function) definition with contracts"
+    },
+    "opcode": {
+      "definition": "'add' | 'sub' | 'mul' | 'div' | 'mod' | 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'ret' | 'jmp' | 'jif' | 'call' | 'mov' | 'load' | 'store'",
+      "description": "Available opcodes"
+    },
+    "operand": {
+      "definition": "register | label_ref | float_literal | int_literal | IDENT",
+      "description": "Instruction operand"
+    },
+    "or_expr": {
+      "definition": "and_expr ('||' and_expr)*",
+      "description": "Logical OR expression"
+    },
+    "param": {
+      "definition": "IDENT ':' type_name",
+      "description": "A single parameter with type"
+    },
+    "params": {
+      "definition": "'@params' param*",
+      "description": "Parameter declarations"
+    },
+    "post": {
+      "definition": "'@post' expr",
+      "description": "Postcondition contract"
+    },
+    "pre": {
+      "definition": "'@pre' expr",
+      "description": "Precondition contract"
+    },
+    "primary": {
+      "definition": "'(' expr ')' | float_literal | int_literal | bool_literal | 'ret' | IDENT",
+      "description": "Primary expression"
+    },
+    "program": {
+      "definition": "node*",
+      "description": "A BMB program consists of zero or more node definitions"
+    },
+    "register": {
+      "definition": "'%' (ALPHA | DIGIT | '_')+",
+      "description": "Register reference"
+    },
+    "returns": {
+      "definition": "'@returns' type_name",
+      "description": "Return type declaration"
+    },
+    "stmt": {
+      "definition": "opcode operand*",
+      "description": "An instruction statement"
+    },
+    "term": {
+      "definition": "factor (('+' | '-') factor)*",
+      "description": "Additive term"
+    },
+    "type_name": {
+      "definition": "'i32' | 'i64' | 'f32' | 'f64' | 'bool'",
+      "description": "Available types"
+    },
+    "unary": {
+      "definition": "('!' | '-')? primary",
+      "description": "Unary expression"
+    }
+  },
+  "description": "BMB (Bare-Metal-Banter) grammar definition",
+  "title": "BMB Grammar",
+  "version": "0.1.0"
+}

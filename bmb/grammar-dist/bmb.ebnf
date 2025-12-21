@@ -1,0 +1,103 @@
+(* BMB Grammar - Extended Backus-Naur Form *)
+(* Version: 0.1.0 *)
+(* "Omission is guessing, and guessing is error." *)
+
+(* A BMB program consists of zero or more node definitions *)
+program = node* ;
+
+(* A node (function) definition with contracts *)
+node = '@node' IDENT params returns contracts body ;
+
+(* Parameter declarations *)
+params = '@params' param* ;
+
+(* A single parameter with type *)
+param = IDENT ':' type_name ;
+
+(* Return type declaration *)
+returns = '@returns' type_name ;
+
+(* Pre and post condition contracts *)
+contracts = (pre | post)* ;
+
+(* Precondition contract *)
+pre = '@pre' expr ;
+
+(* Postcondition contract *)
+post = '@post' expr ;
+
+(* Function body with labels and statements *)
+body = (label | stmt)+ ;
+
+(* Label for jump targets *)
+label = '_' (ALPHA | DIGIT | '_')+ ':' ;
+
+(* An instruction statement *)
+stmt = opcode operand* ;
+
+(* Available opcodes *)
+opcode = 'add' | 'sub' | 'mul' | 'div' | 'mod' | 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'ret' | 'jmp' | 'jif' | 'call' | 'mov' | 'load' | 'store' ;
+
+(* Instruction operand *)
+operand = register | label_ref | float_literal | int_literal | IDENT ;
+
+(* Register reference *)
+register = '%' (ALPHA | DIGIT | '_')+ ;
+
+(* Label reference (without colon) *)
+label_ref = '_' (ALPHA | DIGIT | '_')+ ;
+
+(* Available types *)
+type_name = 'i32' | 'i64' | 'f32' | 'f64' | 'bool' ;
+
+(* Contract expression *)
+expr = or_expr ;
+
+(* Logical OR expression *)
+or_expr = and_expr ('||' and_expr)* ;
+
+(* Logical AND expression *)
+and_expr = comparison ('&&' comparison)* ;
+
+(* Comparison expression *)
+comparison = term (comp_op term)? ;
+
+(* Comparison operators *)
+comp_op = '==' | '!=' | '<=' | '>=' | '<' | '>' ;
+
+(* Additive term *)
+term = factor (('+' | '-') factor)* ;
+
+(* Multiplicative factor *)
+factor = unary (('*' | '/' | '%') unary)* ;
+
+(* Unary expression *)
+unary = ('!' | '-')? primary ;
+
+(* Primary expression *)
+primary = '(' expr ')' | float_literal | int_literal | bool_literal | 'ret' | IDENT ;
+
+(* Floating-point literal *)
+float_literal = '-'? DIGIT+ '.' DIGIT+ ;
+
+(* Integer literal *)
+int_literal = '-'? DIGIT+ ;
+
+(* Boolean literal *)
+bool_literal = 'true' | 'false' ;
+
+(* Identifier (not starting with underscore) *)
+IDENT = ALPHA (ALPHA | DIGIT | '_')* ;
+
+(* Alphabetic character *)
+ALPHA = [a-zA-Z] ;
+
+(* Numeric digit *)
+DIGIT = [0-9] ;
+
+(* Whitespace (ignored) *)
+WHITESPACE = ' ' | '\t' | '\r' | '\n' ;
+
+(* Comment (to end of line) *)
+COMMENT = '#' (!NEWLINE ANY)* ;
+

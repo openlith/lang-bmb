@@ -98,6 +98,28 @@ enum Commands {
         #[arg(long)]
         deny_warnings: bool,
     },
+
+    /// Export BMB grammar to external formats
+    Grammar {
+        /// Output format: ebnf, json, or gbnf
+        #[arg(long, default_value = "ebnf")]
+        format: String,
+
+        /// Output file path (defaults to stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Validate BMB source code (quick validation API for external tools)
+    Validate {
+        /// Input BMB source file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Output validation result as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -118,6 +140,8 @@ fn main() -> ExitCode {
             file,
             deny_warnings,
         } => cmd_lint(file, deny_warnings),
+        Commands::Grammar { format, output } => cmd_grammar(format, output),
+        Commands::Validate { file, json } => cmd_validate(file, json),
     }
 }
 
@@ -615,5 +639,97 @@ fn cmd_lint(file: PathBuf, deny_warnings: bool) -> ExitCode {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn cmd_grammar(format: String, output: Option<PathBuf>) -> ExitCode {
+    let grammar = bmb::grammar::BmbGrammar::new();
+
+    let content = match format.to_lowercase().as_str() {
+        "ebnf" => grammar.to_ebnf(),
+        "json" => grammar.to_json_schema(),
+        "gbnf" => grammar.to_gbnf(),
+        other => {
+            eprintln!(
+                "{}: unknown format '{}'. Use: ebnf, json, or gbnf",
+                "error".red().bold(),
+                other
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Some(path) = output {
+        if let Err(e) = fs::write(&path, &content) {
+            eprintln!(
+                "{}: could not write '{}': {}",
+                "error".red().bold(),
+                path.display(),
+                e
+            );
+            return ExitCode::FAILURE;
+        }
+        println!(
+            "{} grammar exported to {} ({})",
+            "OK".green().bold(),
+            path.display(),
+            format
+        );
+    } else {
+        print!("{}", content);
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn cmd_validate(file: PathBuf, json: bool) -> ExitCode {
+    let source = match fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "{}: could not read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let result = bmb::grammar::validate(&source);
+
+    if json {
+        let json_output = serde_json::json!({
+            "valid": result.valid,
+            "level": result.level.to_string(),
+            "errors": result.errors,
+            "warnings": result.warnings
+        });
+        println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+    } else {
+        if result.valid {
+            println!(
+                "{} {} - validation passed ({})",
+                "OK".green().bold(),
+                file.display(),
+                result.level
+            );
+        } else {
+            eprintln!(
+                "{} {} - validation failed at {}",
+                "FAIL".red().bold(),
+                file.display(),
+                result.level
+            );
+            for error in &result.errors {
+                eprintln!("  {}", error);
+            }
+        }
+    }
+
+    if result.valid {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
 }

@@ -18,6 +18,7 @@ pub mod codegen;
 pub mod contracts;
 pub mod error;
 pub mod fmt;
+pub mod grammar;
 pub mod lint;
 pub mod optimize;
 pub mod parser;
