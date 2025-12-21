@@ -69,6 +69,8 @@ pub enum SmtExpr {
     Int(i64),
     Bool(bool),
     Var(String),
+    /// Old value reference: old_x refers to x's value at function entry
+    OldVar(String),
     Neg(Box<SmtExpr>),
     Not(Box<SmtExpr>),
     Add(Box<SmtExpr>, Box<SmtExpr>),
@@ -100,6 +102,7 @@ impl SmtExpr {
             }
             SmtExpr::Bool(b) => b.to_string(),
             SmtExpr::Var(name) => name.clone(),
+            SmtExpr::OldVar(name) => format!("old_{}", name),
             SmtExpr::Neg(e) => format!("(- {})", e.to_smtlib()),
             SmtExpr::Not(e) => format!("(not {})", e.to_smtlib()),
             SmtExpr::Add(l, r) => format!("(+ {} {})", l.to_smtlib(), r.to_smtlib()),
@@ -150,6 +153,17 @@ pub fn translate_expr(expr: &Expr) -> Result<SmtExpr, BmbError> {
         }),
         Expr::Var(id) => Ok(SmtExpr::Var(id.name.clone())),
         Expr::Ret => Ok(SmtExpr::Var("ret".to_string())),
+        Expr::Old(inner) => {
+            // old(expr) translates to old_* variables
+            // For now, we only support old(variable), not complex expressions
+            match inner.as_ref() {
+                Expr::Var(id) => Ok(SmtExpr::OldVar(id.name.clone())),
+                Expr::Ret => Ok(SmtExpr::OldVar("ret".to_string())),
+                _ => Err(BmbError::ContractError {
+                    message: "old() currently only supports simple variable references".to_string(),
+                }),
+            }
+        }
         Expr::Binary { op, left, right } => {
             let l = Box::new(translate_expr(left)?);
             let r = Box::new(translate_expr(right)?);
@@ -264,18 +278,28 @@ impl<'a, Br: std::io::BufRead> rsmt2::parse::ModelParser<String, String, String,
     }
 }
 
+/// Result of verifying a loop invariant
+#[derive(Debug, Clone)]
+pub struct InvariantResult {
+    pub label: String,
+    pub result: VerificationResult,
+}
+
 /// Result of verifying a single node
 #[derive(Debug, Clone)]
 pub struct NodeVerificationResult {
     pub node_name: String,
     pub precondition: VerificationResult,
     pub postcondition: VerificationResult,
+    pub invariants: Vec<InvariantResult>,
 }
 
 impl NodeVerificationResult {
     /// Returns true if all contracts were proven
     pub fn all_proven(&self) -> bool {
-        self.precondition.is_proven() && self.postcondition.is_proven()
+        self.precondition.is_proven()
+            && self.postcondition.is_proven()
+            && self.invariants.iter().all(|inv| inv.result.is_proven())
     }
 }
 
@@ -341,6 +365,17 @@ pub fn verify_program(program: &TypedProgram) -> Result<Vec<NodeVerificationResu
                     postcondition: VerificationResult::SolverNotFound(
                         "No SMT solver found (z3, cvc5, or cvc4)".to_string(),
                     ),
+                    invariants: n
+                        .node
+                        .invariants
+                        .iter()
+                        .map(|inv| InvariantResult {
+                            label: inv.label.name.clone(),
+                            result: VerificationResult::SolverNotFound(
+                                "No SMT solver found (z3, cvc5, or cvc4)".to_string(),
+                            ),
+                        })
+                        .collect(),
                 })
                 .collect());
         }
@@ -369,6 +404,18 @@ pub fn verify_node(conf: &SmtConf, node: &TypedNode) -> Result<NodeVerificationR
         })
         .collect();
 
+    // Add old_ prefixed variables for postcondition old() expressions
+    let old_vars: Vec<SmtVar> = node
+        .node
+        .params
+        .iter()
+        .map(|p| SmtVar {
+            name: format!("old_{}", p.name.name),
+            sort: type_to_smt_sort(&p.ty),
+        })
+        .collect();
+    vars.extend(old_vars);
+
     // Add return variable
     vars.push(SmtVar {
         name: "ret".to_string(),
@@ -385,7 +432,7 @@ pub fn verify_node(conf: &SmtConf, node: &TypedNode) -> Result<NodeVerificationR
     // Verify postcondition holds given precondition
     let post_result = if let Some(ref post) = node.node.postcondition {
         if let Some(ref pre) = node.node.precondition {
-            verify_implication(conf, &vars, pre, post)?
+            verify_implication_with_old(conf, &vars, pre, post, &node.node.params)?
         } else {
             verify_validity(conf, &vars, post)?
         }
@@ -393,11 +440,81 @@ pub fn verify_node(conf: &SmtConf, node: &TypedNode) -> Result<NodeVerificationR
         VerificationResult::Proven
     };
 
+    // Verify loop invariants
+    let mut invariant_results = Vec::new();
+    for inv in &node.node.invariants {
+        // For now, we just check if the invariant is satisfiable
+        // Full loop invariant verification would require analyzing the loop body
+        let result = verify_satisfiability(conf, &vars, &inv.condition)?;
+        invariant_results.push(InvariantResult {
+            label: inv.label.name.clone(),
+            result,
+        });
+    }
+
     Ok(NodeVerificationResult {
         node_name: node.node.name.name.clone(),
         precondition: pre_result,
         postcondition: post_result,
+        invariants: invariant_results,
     })
+}
+
+/// Verify that precondition implies postcondition, with old() variable bindings
+fn verify_implication_with_old(
+    conf: &SmtConf,
+    vars: &[SmtVar],
+    pre: &Expr,
+    post: &Expr,
+    params: &[crate::ast::Parameter],
+) -> Result<VerificationResult, BmbError> {
+    let mut solver = Solver::new(conf.clone(), BmbParser)
+        .map_err(|e| BmbError::ContractError { message: e.to_string() })?;
+
+    // Declare variables
+    for var in vars {
+        solver
+            .declare_const(&var.name, &var.sort)
+            .map_err(|e| BmbError::ContractError { message: e.to_string() })?;
+    }
+
+    // Bind old_x = x at function entry (precondition point)
+    for param in params {
+        let binding = format!(
+            "(assert (= old_{} {}))",
+            param.name.name, param.name.name
+        );
+        solver
+            .assert(binding)
+            .map_err(|e| BmbError::ContractError { message: e.to_string() })?;
+    }
+
+    // Translate expressions
+    let pre_smt = translate_expr(pre)?;
+    let post_smt = translate_expr(post)?;
+
+    // Assert: pre AND NOT(post)
+    // If UNSAT, then pre implies post
+    let assertion = format!(
+        "(assert (and {} (not {})))",
+        pre_smt.to_bool_smtlib(),
+        post_smt.to_bool_smtlib()
+    );
+    solver
+        .assert(assertion)
+        .map_err(|e| BmbError::ContractError { message: e.to_string() })?;
+
+    let sat = solver
+        .check_sat()
+        .map_err(|e| BmbError::ContractError { message: e.to_string() })?;
+
+    if sat {
+        // Try to get a model (counterexample)
+        let model = get_model(&mut solver, vars);
+        Ok(VerificationResult::CounterExample(model))
+    } else {
+        Ok(VerificationResult::Proven)
+    }
 }
 
 /// Map BMB type to SMT-LIB sort
@@ -567,15 +684,48 @@ pub fn generate_smtlib2(node: &TypedNode) -> Result<String, BmbError> {
         output.push_str(&format!("(declare-const {} {})\n", param.name.name, sort));
     }
 
+    // Declare old_ versions of parameters (for postcondition old() expressions)
+    if !node.node.params.is_empty() {
+        output.push_str("\n; Old (pre-state) values for postcondition verification\n");
+        for param in &node.node.params {
+            let sort = type_to_smt_sort(&param.ty);
+            output.push_str(&format!(
+                "(declare-const old_{} {})\n",
+                param.name.name, sort
+            ));
+        }
+        // Bind old_x = x at function entry
+        for param in &node.node.params {
+            output.push_str(&format!(
+                "(assert (= old_{} {}))\n",
+                param.name.name, param.name.name
+            ));
+        }
+    }
+
     // Declare return value
     let ret_sort = type_to_smt_sort(&node.node.returns);
-    output.push_str(&format!("(declare-const ret {})\n\n", ret_sort));
+    output.push_str(&format!("\n(declare-const ret {})\n\n", ret_sort));
 
     // Precondition
     if let Some(ref pre) = node.node.precondition {
         let smt_pre = translate_expr(pre)?;
         output.push_str("; Precondition\n");
         output.push_str(&format!("(assert {})\n\n", smt_pre.to_bool_smtlib()));
+    }
+
+    // Loop invariants
+    if !node.node.invariants.is_empty() {
+        output.push_str("; Loop Invariants\n");
+        for inv in &node.node.invariants {
+            let smt_inv = translate_expr(&inv.condition)?;
+            output.push_str(&format!(
+                "; Invariant at _{}\n(assert {})\n",
+                inv.label.name,
+                smt_inv.to_bool_smtlib()
+            ));
+        }
+        output.push('\n');
     }
 
     // Postcondition check (negated)
@@ -737,6 +887,7 @@ mod tests {
                     right: Box::new(Expr::IntLit(0)),
                 }),
                 postcondition: Some(Expr::BoolLit(true)),
+                invariants: vec![],
                 body: vec![],
                 span: Span::default(),
             },
@@ -750,5 +901,18 @@ mod tests {
         assert!(smtlib.contains("(declare-const ret Int)"));
         assert!(smtlib.contains("(assert (not (= b 0)))"));
         assert!(smtlib.contains("(check-sat)"));
+    }
+
+    #[test]
+    fn test_translate_old_expr() {
+        let expr = Expr::Old(Box::new(Expr::Var(ident("x"))));
+        let smt = translate_expr(&expr).unwrap();
+        assert_eq!(smt.to_smtlib(), "old_x");
+    }
+
+    #[test]
+    fn test_old_var_smtlib() {
+        let smt = SmtExpr::OldVar("counter".to_string());
+        assert_eq!(smt.to_smtlib(), "old_counter");
     }
 }

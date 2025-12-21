@@ -50,6 +50,15 @@ fn format_node(node: &Node) -> String {
         output.push_str(&format!("@post {}\n", format_expr(post)));
     }
 
+    // Loop invariants
+    for inv in &node.invariants {
+        output.push_str(&format!(
+            "@invariant _{} {}\n",
+            inv.label.name,
+            format_expr(&inv.condition)
+        ));
+    }
+
     // Body
     for instr in &node.body {
         output.push_str(&format_instruction(instr));
@@ -121,6 +130,7 @@ fn format_expr(expr: &Expr) -> String {
         Expr::BoolLit(b) => b.to_string(),
         Expr::Var(id) => id.name.clone(),
         Expr::Ret => "ret".to_string(),
+        Expr::Old(inner) => format!("old({})", format_expr(inner)),
         Expr::Binary { op, left, right } => {
             let left_str = format_expr(left);
             let right_str = format_expr(right);

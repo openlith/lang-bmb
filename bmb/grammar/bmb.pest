@@ -54,10 +54,12 @@ param = { ident ~ ":" ~ type_name }
 // Return type
 returns = { "@returns" ~ type_name }
 
-// Contracts (can have multiple @pre and @post)
-contracts = { (pre | post)* }
+// Contracts (can have multiple @pre, @post, and @invariant)
+contracts = { (pre | post | invariant)* }
 pre = { "@pre" ~ expr }
 post = { "@post" ~ expr }
+// Loop invariant: @invariant _label condition
+invariant = { "@invariant" ~ label_ref ~ expr }
 
 // Function body - explicitly mark start with indented instructions
 body = { (label | stmt)+ }
@@ -132,8 +134,10 @@ unary = { unary_op? ~ primary }
 unary_op = { "!" | "-" }
 
 // 'ret' is a special keyword in contracts that refers to return value
-primary = { "(" ~ expr ~ ")" | float_literal | int_literal | bool_literal | ret_keyword | ident }
+// 'old(expr)' refers to the pre-state value of an expression
+primary = { "(" ~ expr ~ ")" | old_expr | float_literal | int_literal | bool_literal | ret_keyword | ident }
 ret_keyword = { "ret" ~ !ASCII_ALPHANUMERIC }
+old_expr = { "old" ~ "(" ~ expr ~ ")" }
 
 // Literals
 float_literal = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }

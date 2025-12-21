@@ -1053,6 +1053,7 @@ mod tests {
                 returns,
                 precondition: None,
                 postcondition: None,
+                invariants: vec![],
                 body,
                 span: Span::default(),
             },

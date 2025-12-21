@@ -53,6 +53,14 @@ pub struct Import {
     pub span: Span,
 }
 
+/// A loop invariant attached to a label
+#[derive(Debug, Clone)]
+pub struct Invariant {
+    pub label: Identifier,
+    pub condition: Expr,
+    pub span: Span,
+}
+
 /// A function node in BMB
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -61,6 +69,8 @@ pub struct Node {
     pub returns: Type,
     pub precondition: Option<Expr>,
     pub postcondition: Option<Expr>,
+    /// Loop invariants: @invariant _label condition
+    pub invariants: Vec<Invariant>,
     pub body: Vec<Instruction>,
     pub span: Span,
 }
@@ -290,6 +300,8 @@ pub enum Expr {
     BoolLit(bool),
     /// Return value reference (for postconditions)
     Ret,
+    /// Old value reference (for postconditions): old(x) refers to x's value at function entry
+    Old(Box<Expr>),
 }
 
 /// Binary operators

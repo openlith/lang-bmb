@@ -155,12 +155,13 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
 
     let mut preconditions = Vec::new();
     let mut postconditions = Vec::new();
+    let mut invariants = Vec::new();
     let mut body = Vec::new();
 
     for item in inner {
         match item.as_rule() {
             Rule::contracts => {
-                // Parse contracts block which can contain multiple @pre and @post
+                // Parse contracts block which can contain multiple @pre, @post, and @invariant
                 for contract in item.into_inner() {
                     match contract.as_rule() {
                         Rule::pre => {
@@ -168,6 +169,21 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
                         }
                         Rule::post => {
                             postconditions.push(parse_expr(contract.into_inner().next().unwrap())?);
+                        }
+                        Rule::invariant => {
+                            let inv_span = pair_to_span(&contract);
+                            let mut inv_inner = contract.into_inner();
+                            // Parse label reference (e.g., _loop)
+                            let label_pair = inv_inner.next().unwrap();
+                            let label_name = label_pair.as_str()[1..].to_string(); // Remove '_' prefix
+                            let label = Identifier::new(label_name, pair_to_span(&label_pair));
+                            // Parse condition expression
+                            let condition = parse_expr(inv_inner.next().unwrap())?;
+                            invariants.push(Invariant {
+                                label,
+                                condition,
+                                span: inv_span,
+                            });
                         }
                         _ => {}
                     }
@@ -221,6 +237,7 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
         returns,
         precondition,
         postcondition,
+        invariants,
         body,
         span,
     })
@@ -582,6 +599,11 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
         Rule::ret_keyword => {
             // 'ret' keyword in contracts refers to the return value
             Ok(Expr::Ret)
+        }
+        Rule::old_expr => {
+            // old(expr) refers to the pre-state value of an expression
+            let inner_expr = parse_expr(pair.into_inner().next().unwrap())?;
+            Ok(Expr::Old(Box::new(inner_expr)))
         }
         Rule::ident => Ok(Expr::Var(parse_identifier(pair)?)),
         _ => Err(BmbError::ParseError {

@@ -683,6 +683,9 @@ fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type> {
             .ok_or_else(|| BmbError::TypeError {
                 message: "'ret' used outside of function context".to_string(),
             }),
+        // old(expr) has the same type as the inner expression
+        // Used in postconditions to reference pre-state values
+        Expr::Old(inner) => typecheck_expr(inner, env),
     }
 }
 

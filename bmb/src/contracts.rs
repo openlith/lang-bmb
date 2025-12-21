@@ -73,6 +73,10 @@ fn validate_contract_expr(expr: &Expr, _contract_type: &str, _function_name: &st
         Expr::Unary { operand, .. } => {
             validate_contract_expr(operand, _contract_type, _function_name)?;
         }
+        Expr::Old(inner) => {
+            // old(expr) is valid in postconditions to refer to pre-state values
+            validate_contract_expr(inner, _contract_type, _function_name)?;
+        }
         Expr::Var(_) | Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ret => {
             // Valid leaf nodes
         }
@@ -357,6 +361,13 @@ impl<'a> ContractCodeGenerator<'a> {
                     }
                 }
             }
+            Expr::Old(inner) => {
+                // old(expr) refers to the value at function entry
+                // For full support, we need to save parameter values at function entry
+                // and use dedicated old_ locals. For now, we evaluate the inner expression.
+                // TODO: Implement proper old() support with saved locals
+                self.generate_expr_with_type(inner, target_type, func);
+            }
         }
     }
 
@@ -412,6 +423,8 @@ impl<'a> ContractCodeGenerator<'a> {
                 UnaryOp::Not => Type::Bool,
                 UnaryOp::Neg => self.infer_expr_type(operand),
             },
+            // old(expr) has the same type as the inner expression
+            Expr::Old(inner) => self.infer_expr_type(inner),
         }
     }
 }
@@ -443,6 +456,7 @@ mod tests {
             returns: AstType::I32,
             precondition: None,
             postcondition: None,
+            invariants: vec![],
             body: vec![],
             span: Span::default(),
         };
