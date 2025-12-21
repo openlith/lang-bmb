@@ -563,6 +563,94 @@ _inner_loop:
     assert_eq!(result, 25);
 }
 
+#[test]
+fn test_execute_forward_jump() {
+    // Forward jump using jif - jumps ahead to a label
+    let source = r#"
+# Forward jump test - conditional early return
+@node abs_value
+@params n:i32
+@returns i32
+@pre true
+@post ret >= 0
+
+  ge %is_positive n 0
+  jif %is_positive _positive
+  sub %r 0 n
+  ret %r
+_positive:
+  ret n
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let abs_value = instance
+        .get_typed_func::<i32, i32>(&mut store, "abs_value")
+        .expect("abs_value function not found");
+
+    // Test positive: 5 -> 5
+    let result = abs_value.call(&mut store, 5).expect("call failed");
+    assert_eq!(result, 5);
+
+    // Test negative: -7 -> 7
+    let result = abs_value.call(&mut store, -7).expect("call failed");
+    assert_eq!(result, 7);
+
+    // Test zero: 0 -> 0
+    let result = abs_value.call(&mut store, 0).expect("call failed");
+    assert_eq!(result, 0);
+}
+
+#[test]
+fn test_execute_factorial_recursive() {
+    // Recursive factorial with forward jump
+    let source = r#"
+# Factorial function - recursive with forward jump
+@node factorial
+@params n:i32
+@returns i32
+@pre n >= 0
+@post ret >= 1
+
+  eq %base n 0
+  jif %base _one
+  sub %n1 n 1
+  call %r factorial %n1
+  mul %r n %r
+  ret %r
+_one:
+  ret 1
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let factorial = instance
+        .get_typed_func::<i32, i32>(&mut store, "factorial")
+        .expect("factorial function not found");
+
+    // Test: 0! = 1
+    let result = factorial.call(&mut store, 0).expect("call failed");
+    assert_eq!(result, 1);
+
+    // Test: 5! = 120
+    let result = factorial.call(&mut store, 5).expect("call failed");
+    assert_eq!(result, 120);
+
+    // Test: 7! = 5040
+    let result = factorial.call(&mut store, 7).expect("call failed");
+    assert_eq!(result, 5040);
+}
+
 // ========== Advanced Type Tests (i64, f32, f64) ==========
 
 #[test]

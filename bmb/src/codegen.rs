@@ -177,17 +177,39 @@ impl CodeGenerator {
         ctx: &FunctionContext,
         cf: &ControlFlowAnalysis,
     ) -> Result<()> {
-        // Track which loops need to be closed
+        // Track which loops and blocks need to be closed
         let mut open_loops: Vec<String> = Vec::new();
+        let mut open_blocks: Vec<String> = Vec::new();
 
         for (pos, instruction) in body.iter().enumerate() {
+            // Check if any blocks start at this position (before processing the instruction)
+            let blocks_starting: Vec<String> = cf
+                .labels
+                .iter()
+                .filter(|(_, info)| info.block_start_position == Some(pos))
+                .map(|(name, _)| name.clone())
+                .collect();
+
+            for block_name in blocks_starting {
+                // Start a block for forward jumps
+                func.instruction(&Instruction::Block(BlockType::Empty));
+                open_blocks.push(block_name);
+            }
+
             match instruction {
                 ast::Instruction::Label(id) => {
                     // Labels in BMB are targets for jumps
                     // In Wasm, we use block/loop structure
                     if let Some(info) = cf.labels.get(&id.name) {
+                        // Close block if this label is a block target
+                        if info.is_block_target {
+                            if let Some(idx) = open_blocks.iter().rposition(|b| b == &id.name) {
+                                func.instruction(&Instruction::End);
+                                open_blocks.remove(idx);
+                            }
+                        }
+                        // Start loop if this label is a loop target
                         if info.is_loop_target {
-                            // Start of a loop
                             func.instruction(&Instruction::Loop(BlockType::Empty));
                             open_loops.push(id.name.clone());
                         }
@@ -216,7 +238,10 @@ impl CodeGenerator {
             }
         }
 
-        // Close any remaining open loops (shouldn't happen in well-formed code)
+        // Close any remaining open structures (shouldn't happen in well-formed code)
+        for _ in open_blocks.iter() {
+            func.instruction(&Instruction::End);
+        }
         for _ in open_loops.iter() {
             func.instruction(&Instruction::End);
         }
@@ -357,28 +382,59 @@ impl CodeGenerator {
         current_pos: usize,
         cf: &ControlFlowAnalysis,
     ) -> u32 {
-        // Get the list of active loops at the current position
+        // Get the list of active loops and blocks at the current position
         let active_loops = cf
             .active_loops_at
             .get(current_pos)
             .cloned()
             .unwrap_or_default();
+        let active_blocks = cf
+            .active_blocks_at
+            .get(current_pos)
+            .cloned()
+            .unwrap_or_default();
 
-        // If the target is in the active loops, find its position in the stack
-        // The depth is how many loops are nested inside it (from innermost)
+        // Check if this is a forward jump (to a block)
+        if let Some(info) = cf.labels.get(target_label) {
+            if info.is_block_target && info.position > current_pos {
+                // Forward jump: find the block in active_blocks
+                // Note: blocks are added to active_blocks at their start position,
+                // which is the same as the jump position, so we need to count
+                // the block we're about to create
+
+                // Count all enclosing structures from innermost
+                // For forward jumps, we need to count from the newly started block
+                // The block for this label should be at the top of the stack
+
+                // Since we're at the jump instruction and block is just starting,
+                // we need depth 0 to exit the block we just entered
+                if let Some(pos) = active_blocks.iter().rposition(|b| b == target_label) {
+                    // Found in active blocks, calculate depth from innermost
+                    let blocks_after = active_blocks.len() - pos - 1;
+                    // Also count any active loops that are nested inside this block
+                    return (blocks_after + active_loops.len()) as u32;
+                }
+                // Block is being created at this position, so depth is 0
+                // plus any nested loops
+                return active_loops.len() as u32;
+            }
+        }
+
+        // Backward jump (to a loop): existing logic
         if let Some(pos) = active_loops.iter().position(|l| l == target_label) {
             // The target loop is at position `pos` in the stack
             // Depth is counted from innermost (top of stack), so:
             // depth = (total active loops) - (target position) - 1
-            (active_loops.len() - pos - 1) as u32
+            // Plus any active blocks that are nested inside the loop
+            let loops_after = active_loops.len() - pos - 1;
+            (loops_after + active_blocks.len()) as u32
         } else {
             // Target is not in active loops - check if we're inside any loop
             // and the target is this loop itself (just started)
             if let Some(info) = cf.labels.get(target_label) {
                 if info.is_loop_target && info.position <= current_pos {
                     // We're branching to a loop we're currently in
-                    // Find how deep we are
-                    0 // Default: innermost
+                    active_blocks.len() as u32
                 } else {
                     0
                 }
@@ -587,6 +643,10 @@ struct LabelInfo {
     is_loop_target: bool,
     /// Position of the last backward jump to this label (where loop ends)
     loop_end_position: Option<usize>,
+    /// Whether this label is a block target (has forward jumps to it)
+    is_block_target: bool,
+    /// Position of the first forward jump to this label (where block starts)
+    block_start_position: Option<usize>,
     /// Nesting depth (for calculating br depth)
     depth: u32,
 }
@@ -596,6 +656,8 @@ struct ControlFlowAnalysis {
     labels: HashMap<String, LabelInfo>,
     /// Active loop stack at each position (for depth calculation)
     active_loops_at: Vec<Vec<String>>,
+    /// Active block stack at each position (for forward jump depth calculation)
+    active_blocks_at: Vec<Vec<String>>,
 }
 
 /// Analyze control flow to determine label block structure
@@ -620,18 +682,27 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
         }
     }
 
-    // Second pass: determine loop targets and their boundaries
+    // Second pass: determine loop/block targets and their boundaries
     let mut labels: HashMap<String, LabelInfo> = HashMap::new();
 
     for (label_name, label_pos) in &label_positions {
-        // Find all backward jumps to this label
+        // Find all backward jumps to this label (for loops)
         let backward_jumps: Vec<_> = jump_targets
             .iter()
             .filter(|(jump_pos, target, _)| target == label_name && *jump_pos > *label_pos)
             .collect();
 
+        // Find all forward jumps to this label (for blocks)
+        let forward_jumps: Vec<_> = jump_targets
+            .iter()
+            .filter(|(jump_pos, target, _)| target == label_name && *jump_pos < *label_pos)
+            .collect();
+
         let is_loop = !backward_jumps.is_empty();
         let loop_end = backward_jumps.iter().map(|(pos, _, _)| *pos).max();
+
+        let is_block = !forward_jumps.is_empty();
+        let block_start = forward_jumps.iter().map(|(pos, _, _)| *pos).min();
 
         labels.insert(
             label_name.clone(),
@@ -639,15 +710,19 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
                 position: *label_pos,
                 is_loop_target: is_loop,
                 loop_end_position: loop_end,
+                is_block_target: is_block,
+                block_start_position: block_start,
                 depth: 0, // Will be calculated in third pass
             },
         );
     }
 
     // Third pass: calculate nesting depth at each position
-    // Track which loops are active at each instruction position
+    // Track which loops and blocks are active at each instruction position
     let mut active_loops_at: Vec<Vec<String>> = vec![Vec::new(); body.len()];
+    let mut active_blocks_at: Vec<Vec<String>> = vec![Vec::new(); body.len()];
     let mut current_loops: Vec<String> = Vec::new();
+    let mut current_blocks: Vec<String> = Vec::new();
 
     for (pos, instr) in body.iter().enumerate() {
         // Check if any loops end at this position
@@ -657,14 +732,33 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
             .map(|(name, _)| name.clone())
             .collect();
 
-        // First, record active loops at this position (before any changes)
+        // Check if any blocks start at this position (forward jump origin)
+        let blocks_starting: Vec<String> = labels
+            .iter()
+            .filter(|(_, info)| info.block_start_position == Some(pos))
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        // First, record active loops/blocks at this position (before any changes)
         active_loops_at[pos] = current_loops.clone();
+        active_blocks_at[pos] = current_blocks.clone();
+
+        // Handle block starts (at the forward jump instruction)
+        for block_name in blocks_starting {
+            current_blocks.push(block_name);
+        }
 
         // Handle loop starts
         if let ast::Instruction::Label(id) = instr {
             if let Some(info) = labels.get(&id.name) {
                 if info.is_loop_target {
                     current_loops.push(id.name.clone());
+                }
+                // Block ends at the label (the target)
+                if info.is_block_target {
+                    if let Some(idx) = current_blocks.iter().position(|b| b == &id.name) {
+                        current_blocks.remove(idx);
+                    }
                 }
             }
         }
@@ -680,10 +774,7 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
     // Fourth pass: set depth for each label based on nesting
     for (_label_name, info) in labels.iter_mut() {
         if info.is_loop_target {
-            // Depth when inside the loop is the number of enclosing loops
-            // For br inside a loop, depth 0 = the innermost loop
             if let Some(active) = active_loops_at.get(info.position) {
-                // Count loops that are active when this loop starts
                 info.depth = active.len() as u32;
             }
         }
@@ -692,6 +783,7 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
     ControlFlowAnalysis {
         labels,
         active_loops_at,
+        active_blocks_at,
     }
 }
 
