@@ -283,6 +283,50 @@ pub fn compile_to_pe_with_opt(
     Ok((pe, VerificationLevel::Silver))
 }
 
+/// Compile BMB source code to native x64 macOS Mach-O executable
+///
+/// This compiles BMB code directly to x64 machine code and wraps it in
+/// a Mach-O 64-bit executable format. The resulting binary can run directly on
+/// macOS x86-64 systems.
+///
+/// # Arguments
+///
+/// * `source` - The BMB source code to compile
+///
+/// # Returns
+///
+/// * The Mach-O 64 executable bytes and verification level achieved
+pub fn compile_to_macho(source: &str) -> Result<(Vec<u8>, VerificationLevel)> {
+    compile_to_macho_with_opt(source, optimize::OptLevel::Basic)
+}
+
+/// Compile BMB source code to macOS Mach-O with specified optimization level
+pub fn compile_to_macho_with_opt(
+    source: &str,
+    opt_level: optimize::OptLevel,
+) -> Result<(Vec<u8>, VerificationLevel)> {
+    // Phase 1: Parse
+    let ast = parser::parse(source)?;
+
+    // Phase 2: Type check
+    let typed_ast = types::typecheck(&ast)?;
+
+    // Phase 3: Verify contracts
+    let mut verified_ast = contracts::verify(&typed_ast)?;
+
+    // Phase 4: Optimize
+    optimize::optimize(&mut verified_ast, opt_level);
+
+    // Phase 5: Generate x64 machine code
+    let mut codegen = x64::X64Codegen::new();
+    let code = codegen.compile_executable(&verified_ast.program)?;
+
+    // Phase 6: Wrap in Mach-O format
+    let macho = x64::MachO64Builder::new().code(code).build();
+
+    Ok((macho, VerificationLevel::Silver))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +344,31 @@ mod tests {
         assert_eq!(VerificationLevel::Bronze.to_string(), "Bronze (Level 1)");
         assert_eq!(VerificationLevel::Silver.to_string(), "Silver (Level 2)");
         assert_eq!(VerificationLevel::Gold.to_string(), "Gold (Level 3)");
+    }
+
+    #[test]
+    fn test_compile_to_macho() {
+        let source = r#"
+@node main
+@params
+@returns i32
+  mov %result 42
+  ret %result
+"#;
+        let (macho, level) = compile_to_macho(source).expect("Mach-O compilation failed");
+
+        // Check Mach-O magic (little-endian: 0xFEEDFACF = MH_MAGIC_64)
+        assert!(macho.len() >= 4, "Mach-O file too small");
+        assert_eq!(
+            &macho[0..4],
+            &[0xCF, 0xFA, 0xED, 0xFE],
+            "Not a Mach-O 64-bit file"
+        );
+
+        // Check CPU type at offset 4 (x86_64 = 0x01000007)
+        let cputype = i32::from_le_bytes([macho[4], macho[5], macho[6], macho[7]]);
+        assert_eq!(cputype, 0x0100_0007, "Not x86_64 CPU type");
+
+        assert_eq!(level, VerificationLevel::Silver);
     }
 }
