@@ -1,0 +1,10 @@
+# BMB Hello World
+# Returns the answer to life, the universe, and everything
+
+@node hello
+@params
+@returns i32
+@pre true
+@post ret == 42
+
+  ret 42
