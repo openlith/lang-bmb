@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection,
-    Instruction, Module, TypeSection, ValType,
+    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction,
+    Module, TypeSection, ValType,
 };
 
 use crate::ast::{self, Node, Opcode, Operand, Statement, Type};
@@ -60,9 +60,11 @@ impl CodeGenerator {
         for typed_node in &program.nodes {
             let node = &typed_node.node;
             let type_idx = self.register_function_type(node)?;
-            self.function_indices.insert(node.name.name.clone(), self.next_func_idx);
+            self.function_indices
+                .insert(node.name.name.clone(), self.next_func_idx);
             self.functions.function(type_idx);
-            self.exports.export(&node.name.name, ExportKind::Func, self.next_func_idx);
+            self.exports
+                .export(&node.name.name, ExportKind::Func, self.next_func_idx);
             self.next_func_idx += 1;
         }
 
@@ -75,11 +77,7 @@ impl CodeGenerator {
     }
 
     fn register_function_type(&mut self, node: &Node) -> Result<u32> {
-        let params: Vec<ValType> = node
-            .params
-            .iter()
-            .map(|p| type_to_valtype(&p.ty))
-            .collect();
+        let params: Vec<ValType> = node.params.iter().map(|p| type_to_valtype(&p.ty)).collect();
         let results = vec![type_to_valtype(&node.returns)];
 
         let type_idx = self.types.len();
@@ -127,7 +125,8 @@ impl CodeGenerator {
         let mut func = Function::new(local_types);
 
         // Build type map for contract generator (params + registers)
-        let mut all_types: HashMap<String, Type> = node.params
+        let mut all_types: HashMap<String, Type> = node
+            .params
             .iter()
             .map(|p| (p.name.name.clone(), p.ty.clone()))
             .collect();
@@ -137,7 +136,8 @@ impl CodeGenerator {
 
         // Generate precondition check at function entry
         if let Some(ref pre) = node.precondition {
-            let contract_gen = ContractCodeGenerator::new(&locals, &all_types, node.returns.clone());
+            let contract_gen =
+                ContractCodeGenerator::new(&locals, &all_types, node.returns.clone());
             contract_gen.generate_precondition(pre, &mut func);
         }
 
@@ -145,7 +145,11 @@ impl CodeGenerator {
         let ctx = FunctionContext {
             locals: &locals,
             register_types: &typed_node.register_types,
-            param_types: node.params.iter().map(|p| (p.name.name.clone(), p.ty.clone())).collect(),
+            param_types: node
+                .params
+                .iter()
+                .map(|p| (p.name.name.clone(), p.ty.clone()))
+                .collect(),
             return_type: node.returns.clone(),
             function_indices: &self.function_indices,
             postcondition: node.postcondition.clone(),
@@ -194,7 +198,9 @@ impl CodeGenerator {
 
                     // Check if any loops end at this position
                     // Close loops in reverse order (innermost first)
-                    let loops_to_close: Vec<String> = cf.labels.iter()
+                    let loops_to_close: Vec<String> = cf
+                        .labels
+                        .iter()
                         .filter(|(_, info)| info.loop_end_position == Some(pos))
                         .map(|(name, _)| name.clone())
                         .collect();
@@ -244,7 +250,8 @@ impl CodeGenerator {
                 self.generate_operand(&stmt.operands[0], func, ctx)?;
 
                 // If there's a postcondition, check it before returning
-                if let (Some(ref post), Some(result_local)) = (&ctx.postcondition, ctx.result_local) {
+                if let (Some(ref post), Some(result_local)) = (&ctx.postcondition, ctx.result_local)
+                {
                     // Store result to check postcondition
                     func.instruction(&Instruction::LocalSet(result_local));
 
@@ -294,9 +301,11 @@ impl CodeGenerator {
                 // First operand is result register, second is function name
                 let func_name = match &stmt.operands[1] {
                     Operand::Identifier(id) => &id.name,
-                    _ => return Err(BmbError::CodegenError {
-                        message: "Call requires function name".to_string(),
-                    }),
+                    _ => {
+                        return Err(BmbError::CodegenError {
+                            message: "Call requires function name".to_string(),
+                        })
+                    }
                 };
 
                 // Push arguments (operands 2..)
@@ -349,7 +358,9 @@ impl CodeGenerator {
         cf: &ControlFlowAnalysis,
     ) -> u32 {
         // Get the list of active loops at the current position
-        let active_loops = cf.active_loops_at.get(current_pos)
+        let active_loops = cf
+            .active_loops_at
+            .get(current_pos)
             .cloned()
             .unwrap_or_default();
 
@@ -386,7 +397,10 @@ impl CodeGenerator {
     ) -> Result<()> {
         // Determine type from destination register
         let dest_type = if let Operand::Register(r) = &stmt.operands[0] {
-            ctx.register_types.get(&r.name).cloned().unwrap_or(Type::I32)
+            ctx.register_types
+                .get(&r.name)
+                .cloned()
+                .unwrap_or(Type::I32)
         } else {
             Type::I32
         };
@@ -543,15 +557,26 @@ impl<'a> FunctionContext<'a> {
     /// Get type of a variable (parameter or register)
     #[allow(dead_code)]
     fn get_type(&self, name: &str) -> Option<&Type> {
-        self.param_types.get(name).or_else(|| self.register_types.get(name))
+        self.param_types
+            .get(name)
+            .or_else(|| self.register_types.get(name))
     }
 }
 
 /// Binary operation types
 #[derive(Clone, Copy)]
 enum BinaryOp {
-    Add, Sub, Mul, Div, Mod,
-    Eq, Ne, Lt, Le, Gt, Ge,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }
 
 /// Label information for control flow
@@ -600,19 +625,23 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
 
     for (label_name, label_pos) in &label_positions {
         // Find all backward jumps to this label
-        let backward_jumps: Vec<_> = jump_targets.iter()
+        let backward_jumps: Vec<_> = jump_targets
+            .iter()
             .filter(|(jump_pos, target, _)| target == label_name && *jump_pos > *label_pos)
             .collect();
 
         let is_loop = !backward_jumps.is_empty();
         let loop_end = backward_jumps.iter().map(|(pos, _, _)| *pos).max();
 
-        labels.insert(label_name.clone(), LabelInfo {
-            position: *label_pos,
-            is_loop_target: is_loop,
-            loop_end_position: loop_end,
-            depth: 0, // Will be calculated in third pass
-        });
+        labels.insert(
+            label_name.clone(),
+            LabelInfo {
+                position: *label_pos,
+                is_loop_target: is_loop,
+                loop_end_position: loop_end,
+                depth: 0, // Will be calculated in third pass
+            },
+        );
     }
 
     // Third pass: calculate nesting depth at each position
@@ -622,7 +651,8 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
 
     for (pos, instr) in body.iter().enumerate() {
         // Check if any loops end at this position
-        let loops_ending: Vec<String> = labels.iter()
+        let loops_ending: Vec<String> = labels
+            .iter()
             .filter(|(_, info)| info.loop_end_position == Some(pos))
             .map(|(name, _)| name.clone())
             .collect();
@@ -678,11 +708,11 @@ fn type_to_valtype(ty: &Type) -> ValType {
 mod tests {
     use super::*;
     use crate::ast::{
-        Identifier, Node, Opcode, Operand, Parameter, Span, Statement, Type,
-        Instruction as AstInstruction,
+        Identifier, Instruction as AstInstruction, Node, Opcode, Operand, Parameter, Span,
+        Statement, Type,
     };
-    use crate::types::{TypedNode, TypedProgram};
     use crate::contracts::VerifiedProgram;
+    use crate::types::{TypedNode, TypedProgram};
 
     fn make_typed_node(
         name: &str,
@@ -735,10 +765,7 @@ mod tests {
 
         let node = make_typed_node(
             "sum",
-            vec![
-                make_param("a", Type::I32),
-                make_param("b", Type::I32),
-            ],
+            vec![make_param("a", Type::I32), make_param("b", Type::I32)],
             Type::I32,
             vec![
                 AstInstruction::Statement(Statement {
@@ -752,9 +779,7 @@ mod tests {
                 }),
                 AstInstruction::Statement(Statement {
                     opcode: Opcode::Ret,
-                    operands: vec![
-                        Operand::Register(Identifier::new("r", Span::default())),
-                    ],
+                    operands: vec![Operand::Register(Identifier::new("r", Span::default()))],
                     span: Span::default(),
                 }),
             ],
@@ -784,10 +809,7 @@ mod tests {
 
         let node = make_typed_node(
             "divide",
-            vec![
-                make_param("a", Type::F64),
-                make_param("b", Type::F64),
-            ],
+            vec![make_param("a", Type::F64), make_param("b", Type::F64)],
             Type::F64,
             vec![
                 AstInstruction::Statement(Statement {
@@ -801,9 +823,7 @@ mod tests {
                 }),
                 AstInstruction::Statement(Statement {
                     opcode: Opcode::Ret,
-                    operands: vec![
-                        Operand::Register(Identifier::new("r", Span::default())),
-                    ],
+                    operands: vec![Operand::Register(Identifier::new("r", Span::default()))],
                     span: Span::default(),
                 }),
             ],
@@ -843,9 +863,7 @@ mod tests {
                 }),
                 AstInstruction::Statement(Statement {
                     opcode: Opcode::Ret,
-                    operands: vec![
-                        Operand::Register(Identifier::new("r", Span::default())),
-                    ],
+                    operands: vec![Operand::Register(Identifier::new("r", Span::default()))],
                     span: Span::default(),
                 }),
             ],
@@ -875,8 +893,15 @@ mod tests {
         ];
 
         let cf = analyze_control_flow(&body);
-        assert!(cf.labels.get("_loop").map(|l| l.is_loop_target).unwrap_or(false));
+        assert!(cf
+            .labels
+            .get("_loop")
+            .map(|l| l.is_loop_target)
+            .unwrap_or(false));
         // Loop should end at position 1 (the jmp instruction)
-        assert_eq!(cf.labels.get("_loop").map(|l| l.loop_end_position), Some(Some(1)));
+        assert_eq!(
+            cf.labels.get("_loop").map(|l| l.loop_end_position),
+            Some(Some(1))
+        );
     }
 }

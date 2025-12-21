@@ -436,7 +436,9 @@ fn test_f64_precondition() {
         .expect("divide_f64 function not found");
 
     // Test: 10.0 / 2.0 = 5.0 (precondition satisfied)
-    let result = divide_f64.call(&mut store, (10.0, 2.0)).expect("call failed");
+    let result = divide_f64
+        .call(&mut store, (10.0, 2.0))
+        .expect("call failed");
     assert!((result - 5.0).abs() < 1e-10);
 
     // Test: 10.0 / 0.0 should trap (precondition violated)

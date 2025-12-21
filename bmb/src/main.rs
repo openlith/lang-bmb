@@ -74,15 +74,14 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Compile { file, level, emit, output } => {
-            cmd_compile(file, level, emit, output)
-        }
-        Commands::Check { file, level } => {
-            cmd_check(file, level)
-        }
-        Commands::Run { file, func, args } => {
-            cmd_run(file, func, args)
-        }
+        Commands::Compile {
+            file,
+            level,
+            emit,
+            output,
+        } => cmd_compile(file, level, emit, output),
+        Commands::Check { file, level } => cmd_check(file, level),
+        Commands::Run { file, func, args } => cmd_run(file, func, args),
     }
 }
 
@@ -95,13 +94,21 @@ fn parse_level(level: &str) -> Option<VerificationLevel> {
     }
 }
 
-fn cmd_compile(file: PathBuf, level: String, emit: Option<String>, output: Option<PathBuf>) -> ExitCode {
+fn cmd_compile(
+    file: PathBuf,
+    level: String,
+    emit: Option<String>,
+    output: Option<PathBuf>,
+) -> ExitCode {
     // Validate the requested level (for future use)
     let _requested_level = match parse_level(&level) {
         Some(l) => l,
         None => {
-            eprintln!("{}: invalid verification level '{}'. Use: stone, bronze, or silver",
-                "error".red().bold(), level);
+            eprintln!(
+                "{}: invalid verification level '{}'. Use: stone, bronze, or silver",
+                "error".red().bold(),
+                level
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -109,8 +116,12 @@ fn cmd_compile(file: PathBuf, level: String, emit: Option<String>, output: Optio
     let source = match fs::read_to_string(&file) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("{}: could not read '{}': {}",
-                "error".red().bold(), file.display(), e);
+            eprintln!(
+                "{}: could not read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -124,19 +135,24 @@ fn cmd_compile(file: PathBuf, level: String, emit: Option<String>, output: Optio
                         Ok(wat) => {
                             let output_path = output.unwrap_or_else(|| file.with_extension("wat"));
                             if let Err(e) = fs::write(&output_path, &wat) {
-                                eprintln!("{}: could not write '{}': {}",
-                                    "error".red().bold(), output_path.display(), e);
+                                eprintln!(
+                                    "{}: could not write '{}': {}",
+                                    "error".red().bold(),
+                                    output_path.display(),
+                                    e
+                                );
                                 return ExitCode::FAILURE;
                             }
-                            println!("{} {} -> {} ({})",
+                            println!(
+                                "{} {} -> {} ({})",
                                 "Compiled".green().bold(),
                                 file.display(),
                                 output_path.display(),
-                                achieved_level);
+                                achieved_level
+                            );
                         }
                         Err(e) => {
-                            eprintln!("{}: failed to convert to WAT: {}",
-                                "error".red().bold(), e);
+                            eprintln!("{}: failed to convert to WAT: {}", "error".red().bold(), e);
                             return ExitCode::FAILURE;
                         }
                     }
@@ -157,19 +173,28 @@ fn cmd_compile(file: PathBuf, level: String, emit: Option<String>, output: Optio
                 Some("wasm") | None => {
                     let output_path = output.unwrap_or_else(|| file.with_extension("wasm"));
                     if let Err(e) = fs::write(&output_path, &wasm) {
-                        eprintln!("{}: could not write '{}': {}",
-                            "error".red().bold(), output_path.display(), e);
+                        eprintln!(
+                            "{}: could not write '{}': {}",
+                            "error".red().bold(),
+                            output_path.display(),
+                            e
+                        );
                         return ExitCode::FAILURE;
                     }
-                    println!("{} {} -> {} ({})",
+                    println!(
+                        "{} {} -> {} ({})",
                         "Compiled".green().bold(),
                         file.display(),
                         output_path.display(),
-                        achieved_level);
+                        achieved_level
+                    );
                 }
                 Some(other) => {
-                    eprintln!("{}: unknown emit format '{}'. Use: wasm, wat, or ast",
-                        "error".red().bold(), other);
+                    eprintln!(
+                        "{}: unknown emit format '{}'. Use: wasm, wat, or ast",
+                        "error".red().bold(),
+                        other
+                    );
                     return ExitCode::FAILURE;
                 }
             }
@@ -203,8 +228,11 @@ fn cmd_check(file: PathBuf, level: String) -> ExitCode {
     let _requested_level = match parse_level(&level) {
         Some(l) => l,
         None => {
-            eprintln!("{}: invalid verification level '{}'. Use: stone, bronze, or silver",
-                "error".red().bold(), level);
+            eprintln!(
+                "{}: invalid verification level '{}'. Use: stone, bronze, or silver",
+                "error".red().bold(),
+                level
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -212,8 +240,12 @@ fn cmd_check(file: PathBuf, level: String) -> ExitCode {
     let source = match fs::read_to_string(&file) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("{}: could not read '{}': {}",
-                "error".red().bold(), file.display(), e);
+            eprintln!(
+                "{}: could not read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -221,10 +253,12 @@ fn cmd_check(file: PathBuf, level: String) -> ExitCode {
     // For check, we compile but don't write output
     match compile(&source) {
         Ok((_wasm, achieved_level)) => {
-            println!("{} {} ({})",
+            println!(
+                "{} {} ({})",
                 "Verified".green().bold(),
                 file.display(),
-                achieved_level);
+                achieved_level
+            );
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -240,8 +274,12 @@ fn cmd_run(file: PathBuf, func: Option<String>, args: Vec<String>) -> ExitCode {
     let source = match fs::read_to_string(&file) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("{}: could not read '{}': {}",
-                "error".red().bold(), file.display(), e);
+            eprintln!(
+                "{}: could not read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -258,8 +296,11 @@ fn cmd_run(file: PathBuf, func: Option<String>, args: Vec<String>) -> ExitCode {
     let module = match Module::new(&engine, &wasm) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("{}: failed to create WASM module: {}",
-                "error".red().bold(), e);
+            eprintln!(
+                "{}: failed to create WASM module: {}",
+                "error".red().bold(),
+                e
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -268,15 +309,19 @@ fn cmd_run(file: PathBuf, func: Option<String>, args: Vec<String>) -> ExitCode {
     let instance = match Instance::new(&mut store, &module, &[]) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("{}: failed to instantiate module: {}",
-                "error".red().bold(), e);
+            eprintln!(
+                "{}: failed to instantiate module: {}",
+                "error".red().bold(),
+                e
+            );
             return ExitCode::FAILURE;
         }
     };
 
     // Get function name (use provided or find first export)
     let func_name = func.unwrap_or_else(|| {
-        module.exports()
+        module
+            .exports()
             .filter_map(|e| {
                 if matches!(e.ty(), ExternType::Func(_)) {
                     Some(e.name().to_string())
@@ -291,8 +336,11 @@ fn cmd_run(file: PathBuf, func: Option<String>, args: Vec<String>) -> ExitCode {
     let exported_func = match instance.get_func(&mut store, &func_name) {
         Some(f) => f,
         None => {
-            eprintln!("{}: function '{}' not found in module",
-                "error".red().bold(), func_name);
+            eprintln!(
+                "{}: function '{}' not found in module",
+                "error".red().bold(),
+                func_name
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -302,50 +350,47 @@ fn cmd_run(file: PathBuf, func: Option<String>, args: Vec<String>) -> ExitCode {
     let param_count = func_ty.params().len();
 
     if args.len() != param_count {
-        eprintln!("{}: function '{}' expects {} arguments, got {}",
-            "error".red().bold(), func_name, param_count, args.len());
+        eprintln!(
+            "{}: function '{}' expects {} arguments, got {}",
+            "error".red().bold(),
+            func_name,
+            param_count,
+            args.len()
+        );
         return ExitCode::FAILURE;
     }
 
     let mut wasm_args: Vec<Val> = Vec::new();
     for (arg, param_ty) in args.iter().zip(func_ty.params()) {
         let val = match param_ty {
-            ValType::I32 => {
-                match arg.parse::<i32>() {
-                    Ok(v) => Val::I32(v),
-                    Err(_) => {
-                        eprintln!("{}: cannot parse '{}' as i32", "error".red().bold(), arg);
-                        return ExitCode::FAILURE;
-                    }
+            ValType::I32 => match arg.parse::<i32>() {
+                Ok(v) => Val::I32(v),
+                Err(_) => {
+                    eprintln!("{}: cannot parse '{}' as i32", "error".red().bold(), arg);
+                    return ExitCode::FAILURE;
                 }
-            }
-            ValType::I64 => {
-                match arg.parse::<i64>() {
-                    Ok(v) => Val::I64(v),
-                    Err(_) => {
-                        eprintln!("{}: cannot parse '{}' as i64", "error".red().bold(), arg);
-                        return ExitCode::FAILURE;
-                    }
+            },
+            ValType::I64 => match arg.parse::<i64>() {
+                Ok(v) => Val::I64(v),
+                Err(_) => {
+                    eprintln!("{}: cannot parse '{}' as i64", "error".red().bold(), arg);
+                    return ExitCode::FAILURE;
                 }
-            }
-            ValType::F32 => {
-                match arg.parse::<f32>() {
-                    Ok(v) => Val::F32(v.to_bits()),
-                    Err(_) => {
-                        eprintln!("{}: cannot parse '{}' as f32", "error".red().bold(), arg);
-                        return ExitCode::FAILURE;
-                    }
+            },
+            ValType::F32 => match arg.parse::<f32>() {
+                Ok(v) => Val::F32(v.to_bits()),
+                Err(_) => {
+                    eprintln!("{}: cannot parse '{}' as f32", "error".red().bold(), arg);
+                    return ExitCode::FAILURE;
                 }
-            }
-            ValType::F64 => {
-                match arg.parse::<f64>() {
-                    Ok(v) => Val::F64(v.to_bits()),
-                    Err(_) => {
-                        eprintln!("{}: cannot parse '{}' as f64", "error".red().bold(), arg);
-                        return ExitCode::FAILURE;
-                    }
+            },
+            ValType::F64 => match arg.parse::<f64>() {
+                Ok(v) => Val::F64(v.to_bits()),
+                Err(_) => {
+                    eprintln!("{}: cannot parse '{}' as f64", "error".red().bold(), arg);
+                    return ExitCode::FAILURE;
                 }
-            }
+            },
             _ => {
                 eprintln!("{}: unsupported parameter type", "error".red().bold());
                 return ExitCode::FAILURE;

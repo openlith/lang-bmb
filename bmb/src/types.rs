@@ -138,10 +138,7 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv) -> Result<TypedNode> {
         let pre_type = typecheck_expr(pre, &env)?;
         if pre_type != Type::Bool {
             return Err(BmbError::TypeError {
-                message: format!(
-                    "Precondition must be bool, got {}",
-                    pre_type
-                ),
+                message: format!("Precondition must be bool, got {}", pre_type),
             });
         }
     }
@@ -150,10 +147,7 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv) -> Result<TypedNode> {
         let post_type = typecheck_expr(post, &env)?;
         if post_type != Type::Bool {
             return Err(BmbError::TypeError {
-                message: format!(
-                    "Postcondition must be bool, got {}",
-                    post_type
-                ),
+                message: format!("Postcondition must be bool, got {}", post_type),
             });
         }
     }
@@ -316,16 +310,19 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
 
 fn get_operand_type(operand: &Operand, env: &TypeEnv) -> Result<Type> {
     match operand {
-        Operand::Register(r) => env.get_type(&r.name).cloned().ok_or_else(|| {
-            BmbError::TypeError {
+        Operand::Register(r) => env
+            .get_type(&r.name)
+            .cloned()
+            .ok_or_else(|| BmbError::TypeError {
                 message: format!("Unknown register: %{}", r.name),
-            }
-        }),
-        Operand::Identifier(id) => env.get_type(&id.name).cloned().ok_or_else(|| {
-            BmbError::TypeError {
-                message: format!("Unknown variable: {}", id.name),
-            }
-        }),
+            }),
+        Operand::Identifier(id) => {
+            env.get_type(&id.name)
+                .cloned()
+                .ok_or_else(|| BmbError::TypeError {
+                    message: format!("Unknown variable: {}", id.name),
+                })
+        }
         Operand::IntLiteral(_) => Ok(Type::I32), // Default integer type
         Operand::FloatLiteral(_) => Ok(Type::F64), // Default float type
         Operand::Label(_) => Err(BmbError::TypeError {
@@ -356,7 +353,12 @@ fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type> {
                     }
                     Ok(left_type)
                 }
-                BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+                BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge => {
                     if left_type != right_type {
                         return Err(BmbError::TypeError {
                             message: format!(
@@ -391,19 +393,21 @@ fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type> {
                 }
             }
         }
-        Expr::Var(id) => env.get_type(&id.name).cloned().ok_or_else(|| {
-            BmbError::TypeError {
+        Expr::Var(id) => env
+            .get_type(&id.name)
+            .cloned()
+            .ok_or_else(|| BmbError::TypeError {
                 message: format!("Unknown variable: {}", id.name),
-            }
-        }),
+            }),
         Expr::IntLit(_) => Ok(Type::I32),
         Expr::FloatLit(_) => Ok(Type::F64),
         Expr::BoolLit(_) => Ok(Type::Bool),
-        Expr::Ret => env.get_return_type().cloned().ok_or_else(|| {
-            BmbError::TypeError {
+        Expr::Ret => env
+            .get_return_type()
+            .cloned()
+            .ok_or_else(|| BmbError::TypeError {
                 message: "'ret' used outside of function context".to_string(),
-            }
-        }),
+            }),
     }
 }
 
@@ -507,7 +511,11 @@ _less:
         assert!(result.is_err(), "Should fail due to type mismatch");
 
         if let Err(BmbError::TypeError { message }) = result {
-            assert!(message.contains("same type"), "Error should mention type mismatch: {}", message);
+            assert!(
+                message.contains("same type"),
+                "Error should mention type mismatch: {}",
+                message
+            );
         }
     }
 
@@ -525,7 +533,11 @@ _less:
         assert!(result.is_err(), "Should fail due to return type mismatch");
 
         if let Err(BmbError::TypeError { message }) = result {
-            assert!(message.contains("Return type mismatch"), "Error message: {}", message);
+            assert!(
+                message.contains("Return type mismatch"),
+                "Error message: {}",
+                message
+            );
         }
     }
 

@@ -60,27 +60,20 @@ pub fn verify(program: &TypedProgram) -> Result<VerifiedProgram> {
     })
 }
 
-fn validate_contract_expr(
-    expr: &Expr,
-    contract_type: &str,
-    function_name: &str,
-) -> Result<()> {
+fn validate_contract_expr(expr: &Expr, _contract_type: &str, _function_name: &str) -> Result<()> {
     // For Phase 4, we validate the expression structure
     // Runtime checks will be generated in codegen
+    // Parameters reserved for future error messages
 
     match expr {
         Expr::Binary { left, right, .. } => {
-            validate_contract_expr(left, contract_type, function_name)?;
-            validate_contract_expr(right, contract_type, function_name)?;
+            validate_contract_expr(left, _contract_type, _function_name)?;
+            validate_contract_expr(right, _contract_type, _function_name)?;
         }
         Expr::Unary { operand, .. } => {
-            validate_contract_expr(operand, contract_type, function_name)?;
+            validate_contract_expr(operand, _contract_type, _function_name)?;
         }
-        Expr::Var(_)
-        | Expr::IntLit(_)
-        | Expr::FloatLit(_)
-        | Expr::BoolLit(_)
-        | Expr::Ret => {
+        Expr::Var(_) | Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ret => {
             // Valid leaf nodes
         }
     }
@@ -316,27 +309,27 @@ impl<'a> ContractCodeGenerator<'a> {
             Expr::IntLit(_) => Type::I32,
             Expr::FloatLit(_) => Type::F64,
             Expr::BoolLit(_) => Type::Bool,
-            Expr::Var(name) => {
-                self.types.get(&name.name).cloned().unwrap_or(Type::I32)
-            }
+            Expr::Var(name) => self.types.get(&name.name).cloned().unwrap_or(Type::I32),
             Expr::Ret => self.return_type.clone(),
             Expr::Binary { op, left, .. } => {
                 match op {
                     // Comparison operators always return bool
-                    BinaryOp::Eq | BinaryOp::Ne |
-                    BinaryOp::Lt | BinaryOp::Le |
-                    BinaryOp::Gt | BinaryOp::Ge |
-                    BinaryOp::And | BinaryOp::Or => Type::Bool,
+                    BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::Le
+                    | BinaryOp::Gt
+                    | BinaryOp::Ge
+                    | BinaryOp::And
+                    | BinaryOp::Or => Type::Bool,
                     // Arithmetic operators preserve operand type
                     _ => self.infer_expr_type(left),
                 }
             }
-            Expr::Unary { op, operand } => {
-                match op {
-                    UnaryOp::Not => Type::Bool,
-                    UnaryOp::Neg => self.infer_expr_type(operand),
-                }
-            }
+            Expr::Unary { op, operand } => match op {
+                UnaryOp::Not => Type::Bool,
+                UnaryOp::Neg => self.infer_expr_type(operand),
+            },
         }
     }
 }
@@ -418,7 +411,7 @@ mod tests {
 
         // Test literal types
         assert_eq!(gen.infer_expr_type(&Expr::IntLit(42)), Type::I32);
-        assert_eq!(gen.infer_expr_type(&Expr::FloatLit(3.14)), Type::F64);
+        assert_eq!(gen.infer_expr_type(&Expr::FloatLit(1.5)), Type::F64);
         assert_eq!(gen.infer_expr_type(&Expr::BoolLit(true)), Type::Bool);
 
         // Test variable type

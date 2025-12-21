@@ -14,8 +14,8 @@
 
 pub mod ai;
 pub mod ast;
-pub mod contracts;
 pub mod codegen;
+pub mod contracts;
 pub mod error;
 pub mod parser;
 pub mod types;
@@ -52,19 +52,17 @@ impl BmbError {
     /// Convert to diagnostic if available, or create a basic one
     pub fn to_diagnostic(&self) -> Diagnostic {
         match self {
-            BmbError::ParseError { line, column, message } => {
-                Diagnostic::new(ErrorCode::E002, message.clone())
-                    .with_span(crate::ast::Span::new(0, 0, *line, *column))
-            }
-            BmbError::TypeError { message } => {
-                Diagnostic::new(ErrorCode::E100, message.clone())
-            }
+            BmbError::ParseError {
+                line,
+                column,
+                message,
+            } => Diagnostic::new(ErrorCode::E002, message.clone())
+                .with_span(crate::ast::Span::new(0, 0, *line, *column)),
+            BmbError::TypeError { message } => Diagnostic::new(ErrorCode::E100, message.clone()),
             BmbError::ContractError { message } => {
                 Diagnostic::new(ErrorCode::E200, message.clone())
             }
-            BmbError::CodegenError { message } => {
-                Diagnostic::new(ErrorCode::E300, message.clone())
-            }
+            BmbError::CodegenError { message } => Diagnostic::new(ErrorCode::E300, message.clone()),
             BmbError::Diagnosed(diag) => diag.clone(),
         }
     }

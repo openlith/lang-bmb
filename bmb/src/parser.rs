@@ -239,7 +239,10 @@ fn parse_operand(pair: pest::iterators::Pair<Rule>) -> Result<Operand> {
         }
         Rule::register => {
             let name = pair.as_str()[1..].to_string(); // Remove '%' prefix
-            Ok(Operand::Register(Identifier::new(name, pair_to_span(&pair))))
+            Ok(Operand::Register(Identifier::new(
+                name,
+                pair_to_span(&pair),
+            )))
         }
         Rule::label_ref => {
             let name = pair.as_str()[1..].to_string(); // Remove '_' prefix
@@ -297,11 +300,13 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
                     ">=" => BinaryOp::Ge,
                     "<" => BinaryOp::Lt,
                     ">" => BinaryOp::Gt,
-                    _ => return Err(BmbError::ParseError {
-                        line: 0,
-                        column: 0,
-                        message: format!("Unknown comparison operator: {}", op_pair.as_str()),
-                    }),
+                    _ => {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!("Unknown comparison operator: {}", op_pair.as_str()),
+                        })
+                    }
                 };
                 let right = parse_expr(inner.next().unwrap())?;
                 Ok(Expr::Binary {
@@ -322,11 +327,13 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
                 let op = match op_pair.as_str() {
                     "+" => BinaryOp::Add,
                     "-" => BinaryOp::Sub,
-                    _ => return Err(BmbError::ParseError {
-                        line: 0,
-                        column: 0,
-                        message: format!("Unknown term operator: {}", op_pair.as_str()),
-                    }),
+                    _ => {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!("Unknown term operator: {}", op_pair.as_str()),
+                        })
+                    }
                 };
                 let right = parse_expr(inner.next().unwrap())?;
                 left = Expr::Binary {
@@ -347,11 +354,13 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
                     "*" => BinaryOp::Mul,
                     "/" => BinaryOp::Div,
                     "%" => BinaryOp::Mod,
-                    _ => return Err(BmbError::ParseError {
-                        line: 0,
-                        column: 0,
-                        message: format!("Unknown factor operator: {}", op_pair.as_str()),
-                    }),
+                    _ => {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!("Unknown factor operator: {}", op_pair.as_str()),
+                        })
+                    }
                 };
                 let right = parse_expr(inner.next().unwrap())?;
                 left = Expr::Binary {
@@ -371,11 +380,13 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
                 let op = match first.as_str() {
                     "!" => UnaryOp::Not,
                     "-" => UnaryOp::Neg,
-                    _ => return Err(BmbError::ParseError {
-                        line: 0,
-                        column: 0,
-                        message: format!("Unknown unary operator: {}", first.as_str()),
-                    }),
+                    _ => {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!("Unknown unary operator: {}", first.as_str()),
+                        })
+                    }
                 };
                 let operand = parse_expr(inner.next().unwrap())?;
                 Ok(Expr::Unary {
@@ -407,9 +418,7 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
             // 'ret' keyword in contracts refers to the return value
             Ok(Expr::Ret)
         }
-        Rule::ident => {
-            Ok(Expr::Var(parse_identifier(pair)?))
-        }
+        Rule::ident => Ok(Expr::Var(parse_identifier(pair)?)),
         _ => Err(BmbError::ParseError {
             line: 0,
             column: 0,
@@ -491,7 +500,11 @@ mod tests {
                 for pair in pairs {
                     println!("Rule: {:?}, Text: {:?}", pair.as_rule(), pair.as_str());
                     for inner in pair.into_inner() {
-                        println!("  Inner Rule: {:?}, Text: {:?}", inner.as_rule(), inner.as_str());
+                        println!(
+                            "  Inner Rule: {:?}, Text: {:?}",
+                            inner.as_rule(),
+                            inner.as_str()
+                        );
                     }
                 }
             }
@@ -506,12 +519,20 @@ mod tests {
         // Test if label rule can parse a label directly
         let label_source = "_one:";
         let result = BmbParser::parse(Rule::label, label_source);
-        assert!(result.is_ok(), "Failed to parse label directly: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse label directly: {:?}",
+            result.err()
+        );
 
         // Test label_ref without colon
         let label_ref_source = "_one";
         let result2 = BmbParser::parse(Rule::label_ref, label_ref_source);
-        assert!(result2.is_ok(), "Failed to parse label_ref: {:?}", result2.err());
+        assert!(
+            result2.is_ok(),
+            "Failed to parse label_ref: {:?}",
+            result2.err()
+        );
     }
 
     #[test]
@@ -521,7 +542,11 @@ mod tests {
 _one:
   ret 0"#;
         let result = BmbParser::parse(Rule::body, body_source);
-        assert!(result.is_ok(), "Failed to parse body with label: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse body with label: {:?}",
+            result.err()
+        );
 
         let body = result.unwrap().next().unwrap();
         let items: Vec<_> = body.into_inner().collect();
@@ -533,7 +558,11 @@ _one:
         // Test parsing a body that contains two statements
         let body_source = "add %r a b\nret %r";
         let result = BmbParser::parse(Rule::body, body_source);
-        assert!(result.is_ok(), "Failed to parse body with two stmts: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse body with two stmts: {:?}",
+            result.err()
+        );
 
         let body = result.unwrap().next().unwrap();
         let items: Vec<_> = body.into_inner().collect();
@@ -566,7 +595,12 @@ _one:
         // Check body structure
         assert_eq!(node.body.len(), 2, "Expected 2 instructions in body");
         if let Instruction::Statement(ref stmt) = node.body[0] {
-            assert_eq!(stmt.operands.len(), 3, "add should have 3 operands: {:?}", stmt.operands);
+            assert_eq!(
+                stmt.operands.len(),
+                3,
+                "add should have 3 operands: {:?}",
+                stmt.operands
+            );
         }
     }
 
@@ -619,28 +653,44 @@ _one:
     fn test_parse_factorial_example() {
         let source = include_str!("../tests/examples/factorial.bmb");
         let result = parse(source);
-        assert!(result.is_ok(), "Failed to parse factorial.bmb: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse factorial.bmb: {:?}",
+            result.err()
+        );
     }
 
     #[test]
     fn test_parse_divide_example() {
         let source = include_str!("../tests/examples/divide.bmb");
         let result = parse(source);
-        assert!(result.is_ok(), "Failed to parse divide.bmb: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse divide.bmb: {:?}",
+            result.err()
+        );
     }
 
     #[test]
     fn test_parse_fibonacci_example() {
         let source = include_str!("../tests/examples/fibonacci.bmb");
         let result = parse(source);
-        assert!(result.is_ok(), "Failed to parse fibonacci.bmb: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse fibonacci.bmb: {:?}",
+            result.err()
+        );
     }
 
     #[test]
     fn test_parse_gcd_example() {
         let source = include_str!("../tests/examples/gcd.bmb");
         let result = parse(source);
-        assert!(result.is_ok(), "Failed to parse gcd.bmb: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse gcd.bmb: {:?}",
+            result.err()
+        );
     }
 
     #[test]

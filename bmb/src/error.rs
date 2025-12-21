@@ -76,13 +76,23 @@ impl ErrorCode {
     /// Get a brief description of the error category
     pub fn category(&self) -> &'static str {
         match self {
-            ErrorCode::E001 | ErrorCode::E002 | ErrorCode::E003 |
-            ErrorCode::E004 | ErrorCode::E005 => "parse error",
-            ErrorCode::E100 | ErrorCode::E101 | ErrorCode::E102 |
-            ErrorCode::E103 | ErrorCode::E104 | ErrorCode::E105 |
-            ErrorCode::E106 | ErrorCode::E107 | ErrorCode::E108 => "type error",
-            ErrorCode::E200 | ErrorCode::E201 | ErrorCode::E202 |
-            ErrorCode::E203 => "contract error",
+            ErrorCode::E001
+            | ErrorCode::E002
+            | ErrorCode::E003
+            | ErrorCode::E004
+            | ErrorCode::E005 => "parse error",
+            ErrorCode::E100
+            | ErrorCode::E101
+            | ErrorCode::E102
+            | ErrorCode::E103
+            | ErrorCode::E104
+            | ErrorCode::E105
+            | ErrorCode::E106
+            | ErrorCode::E107
+            | ErrorCode::E108 => "type error",
+            ErrorCode::E200 | ErrorCode::E201 | ErrorCode::E202 | ErrorCode::E203 => {
+                "contract error"
+            }
             ErrorCode::E300 | ErrorCode::E301 | ErrorCode::E302 => "codegen error",
         }
     }
@@ -219,15 +229,12 @@ pub mod diagnostics {
         if let Some(s) = span {
             diag = diag.with_span(s);
         }
-        diag.with_note(format!("all operands must have the same type"))
+        diag.with_note("all operands must have the same type")
     }
 
     /// Create an unknown variable error
     pub fn unknown_variable(name: &str, span: Option<Span>) -> Diagnostic {
-        let mut diag = Diagnostic::new(
-            ErrorCode::E101,
-            format!("unknown variable: {}", name),
-        );
+        let mut diag = Diagnostic::new(ErrorCode::E101, format!("unknown variable: {}", name));
         if let Some(s) = span {
             diag = diag.with_span(s);
         }
@@ -236,10 +243,7 @@ pub mod diagnostics {
 
     /// Create an unknown register error
     pub fn unknown_register(name: &str, span: Option<Span>) -> Diagnostic {
-        let mut diag = Diagnostic::new(
-            ErrorCode::E102,
-            format!("unknown register: %{}", name),
-        );
+        let mut diag = Diagnostic::new(ErrorCode::E102, format!("unknown register: %{}", name));
         if let Some(s) = span {
             diag = diag.with_span(s);
         }
@@ -248,10 +252,7 @@ pub mod diagnostics {
 
     /// Create an unknown function error
     pub fn unknown_function(name: &str, span: Option<Span>) -> Diagnostic {
-        let mut diag = Diagnostic::new(
-            ErrorCode::E103,
-            format!("unknown function: {}", name),
-        );
+        let mut diag = Diagnostic::new(ErrorCode::E103, format!("unknown function: {}", name));
         if let Some(s) = span {
             diag = diag.with_span(s);
         }

@@ -7,8 +7,8 @@
 //! Run with: cargo run --example constrained_decoder_demo
 
 use bmb::ai::{
-    valid_tokens, valid_keywords, valid_types, valid_opcodes,
-    verify_partial, ConstrainedDecoder, GrammarState, TokenCategory,
+    valid_keywords, valid_opcodes, valid_tokens, valid_types, verify_partial, ConstrainedDecoder,
+    GrammarState,
 };
 
 fn main() {
@@ -37,14 +37,38 @@ fn demo_grammar_states() {
 
     let states = [
         (GrammarState::Start, "Start - Beginning of program"),
-        (GrammarState::ExpectingNodeName, "After @node - Expecting function name"),
-        (GrammarState::ExpectingParams, "After name - Expecting @params"),
-        (GrammarState::InsideParams, "Inside @params - Expecting param or @returns"),
-        (GrammarState::ExpectingParamType, "After param: - Expecting type"),
-        (GrammarState::ExpectingReturnType, "After @returns - Expecting type"),
-        (GrammarState::ExpectingContractOrBody, "After return type - @pre/@post or body"),
-        (GrammarState::InsideBody, "Inside body - Expecting instruction"),
-        (GrammarState::ExpectingOperand, "After opcode - Expecting operand"),
+        (
+            GrammarState::ExpectingNodeName,
+            "After @node - Expecting function name",
+        ),
+        (
+            GrammarState::ExpectingParams,
+            "After name - Expecting @params",
+        ),
+        (
+            GrammarState::InsideParams,
+            "Inside @params - Expecting param or @returns",
+        ),
+        (
+            GrammarState::ExpectingParamType,
+            "After param: - Expecting type",
+        ),
+        (
+            GrammarState::ExpectingReturnType,
+            "After @returns - Expecting type",
+        ),
+        (
+            GrammarState::ExpectingContractOrBody,
+            "After return type - @pre/@post or body",
+        ),
+        (
+            GrammarState::InsideBody,
+            "Inside body - Expecting instruction",
+        ),
+        (
+            GrammarState::ExpectingOperand,
+            "After opcode - Expecting operand",
+        ),
     ];
 
     for (state, description) in states {
@@ -64,7 +88,10 @@ fn demo_grammar_states() {
             }
             GrammarState::InsideBody | GrammarState::ExpectingContractOrBody => {
                 let opcodes = valid_opcodes();
-                println!("   Concrete tokens: {:?}...", &opcodes[..5.min(opcodes.len())]);
+                println!(
+                    "   Concrete tokens: {:?}...",
+                    &opcodes[..5.min(opcodes.len())]
+                );
             }
             _ => {}
         }
@@ -81,13 +108,13 @@ fn demo_token_by_token_generation() {
 
     // Tokens to generate: a simple addition function
     let tokens = [
-        "@node", "sum",           // Function declaration
-        "@params",                // Parameters
-        "a", "i32",              // First param
-        "b", "i32",              // Second param
-        "@returns", "i32",       // Return type
-        "add", "%r", "a", "b",   // add %r a b
-        "ret", "%r",             // ret %r
+        "@node", "sum",     // Function declaration
+        "@params", // Parameters
+        "a", "i32", // First param
+        "b", "i32", // Second param
+        "@returns", "i32", // Return type
+        "add", "%r", "a", "b", // add %r a b
+        "ret", "%r", // ret %r
     ];
 
     println!("🎯 Target: Build a simple addition function\n");
@@ -103,7 +130,11 @@ fn demo_token_by_token_generation() {
         if !valid.is_empty() {
             let display: Vec<_> = valid.iter().take(5).collect();
             if valid.len() > 5 {
-                println!("   Valid options: {:?}... (+{} more)", display, valid.len() - 5);
+                println!(
+                    "   Valid options: {:?}... (+{} more)",
+                    display,
+                    valid.len() - 5
+                );
             } else {
                 println!("   Valid options: {:?}", display);
             }
@@ -145,8 +176,14 @@ fn demo_partial_verification() {
         ("", "Empty program"),
         ("@node", "Just @node keyword"),
         ("@node foo\n@params", "Node with params started"),
-        ("@node foo\n@params x:i32\n@returns i32\n", "Complete header"),
-        ("@node foo\n@params x:i32\n@returns i32\n  mul %r x x\n  ret %r\n", "Complete function"),
+        (
+            "@node foo\n@params x:i32\n@returns i32\n",
+            "Complete header",
+        ),
+        (
+            "@node foo\n@params x:i32\n@returns i32\n  mul %r x x\n  ret %r\n",
+            "Complete function",
+        ),
     ];
 
     for (source, description) in partials {
@@ -158,9 +195,21 @@ fn demo_partial_verification() {
         }
         println!("   Completion: {:.0}%", result.completion * 100.0);
         println!("   Grammar state: {:?}", result.state);
-        println!("   Syntax valid: {}", if result.syntax_valid { "✅" } else { "⚠️ (incomplete)" });
+        println!(
+            "   Syntax valid: {}",
+            if result.syntax_valid {
+                "✅"
+            } else {
+                "⚠️ (incomplete)"
+            }
+        );
 
-        let cats: Vec<_> = result.valid_next.iter().take(3).map(|t| format!("{:?}", t)).collect();
+        let cats: Vec<_> = result
+            .valid_next
+            .iter()
+            .take(3)
+            .map(|t| format!("{:?}", t))
+            .collect();
         println!("   Valid next: {}", cats.join(", "));
         println!();
     }

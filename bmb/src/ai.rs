@@ -178,16 +178,16 @@ pub fn valid_types() -> Vec<&'static str> {
 /// Get list of valid opcodes
 pub fn valid_opcodes() -> Vec<&'static str> {
     vec![
-        "add", "sub", "mul", "div", "mod",
-        "eq", "ne", "lt", "le", "gt", "ge",
-        "ret", "jmp", "jif", "call",
-        "mov", "load", "store",
+        "add", "sub", "mul", "div", "mod", "eq", "ne", "lt", "le", "gt", "ge", "ret", "jmp", "jif",
+        "call", "mov", "load", "store",
     ]
 }
 
 /// Get list of valid comparison operators
 pub fn valid_operators() -> Vec<&'static str> {
-    vec!["==", "!=", "<", "<=", ">", ">=", "&&", "||", "+", "-", "*", "/", "%"]
+    vec![
+        "==", "!=", "<", "<=", ">", ">=", "&&", "||", "+", "-", "*", "/", "%",
+    ]
 }
 
 /// Constrained decoder for BMB code generation
@@ -196,8 +196,8 @@ pub struct ConstrainedDecoder {
     state: GrammarState,
     /// Partial source code being built
     source: String,
-    /// Current indentation level
-    indent: usize,
+    /// Current indentation level (reserved for future formatting)
+    _indent: usize,
     /// Track if we're in a contract expression
     in_expr: bool,
     /// Expected operand count for current instruction
@@ -212,7 +212,7 @@ impl ConstrainedDecoder {
         Self {
             state: GrammarState::Start,
             source: String::new(),
-            indent: 0,
+            _indent: 0,
             in_expr: false,
             expected_operands: 0,
             current_operands: 0,
@@ -241,9 +241,9 @@ impl ConstrainedDecoder {
             GrammarState::ExpectingParamType | GrammarState::ExpectingReturnType => {
                 tokens.extend(valid_types().iter().map(|s| s.to_string()));
             }
-            GrammarState::ExpectingOpcode |
-            GrammarState::ExpectingContractOrBody |
-            GrammarState::InsideBody => {
+            GrammarState::ExpectingOpcode
+            | GrammarState::ExpectingContractOrBody
+            | GrammarState::InsideBody => {
                 tokens.extend(valid_opcodes().iter().map(|s| s.to_string()));
             }
             GrammarState::InsidePrecondition | GrammarState::InsidePostcondition => {
@@ -300,7 +300,10 @@ impl ConstrainedDecoder {
                     self.state = GrammarState::ExpectingParamType;
                     Ok(())
                 } else {
-                    Err(parse_error(format!("Expected parameter or @returns, got '{}'", token)))
+                    Err(parse_error(format!(
+                        "Expected parameter or @returns, got '{}'",
+                        token
+                    )))
                 }
             }
             GrammarState::ExpectingParamType => {
@@ -338,7 +341,10 @@ impl ConstrainedDecoder {
                     self.source.push('\n');
                     self.add_instruction_token(token)
                 } else {
-                    Err(parse_error(format!("Expected @pre, @post, or instruction, got '{}'", token)))
+                    Err(parse_error(format!(
+                        "Expected @pre, @post, or instruction, got '{}'",
+                        token
+                    )))
                 }
             }
             GrammarState::InsidePrecondition => {
@@ -356,12 +362,11 @@ impl ConstrainedDecoder {
                     self.add_instruction_token(token)
                 }
             }
-            GrammarState::ExpectingOperand => {
-                self.add_operand_token(token)
-            }
-            _ => {
-                Err(parse_error(format!("Unexpected token '{}' in state {:?}", token, self.state)))
-            }
+            GrammarState::ExpectingOperand => self.add_operand_token(token),
+            _ => Err(parse_error(format!(
+                "Unexpected token '{}' in state {:?}",
+                token, self.state
+            ))),
         }
     }
 
@@ -387,7 +392,10 @@ impl ConstrainedDecoder {
             }
             Ok(())
         } else {
-            Err(parse_error(format!("Expected opcode or label, got '{}'", token)))
+            Err(parse_error(format!(
+                "Expected opcode or label, got '{}'",
+                token
+            )))
         }
     }
 
@@ -487,22 +495,22 @@ fn is_valid_operand(s: &str) -> bool {
     }
 
     // Register: starts with %
-    if s.starts_with('%') {
-        return s.len() > 1 && s[1..].chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if let Some(rest) = s.strip_prefix('%') {
+        return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     }
 
     // Label reference: starts with _
-    if s.starts_with('_') {
-        return s.len() > 1 && s[1..].chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if let Some(rest) = s.strip_prefix('_') {
+        return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     }
 
     // Integer literal
-    if let Ok(_) = s.parse::<i64>() {
+    if s.parse::<i64>().is_ok() {
         return true;
     }
 
     // Float literal
-    if let Ok(_) = s.parse::<f64>() {
+    if s.parse::<f64>().is_ok() {
         return true;
     }
 
@@ -517,7 +525,7 @@ fn expected_operand_count(opcode: &str) -> usize {
         "eq" | "ne" | "lt" | "le" | "gt" | "ge" => 3,
         "ret" => 1,
         "jmp" => 1,
-        "jif" => 2, // condition label
+        "jif" => 2,  // condition label
         "call" => 2, // At least dest and func_name, can have more
         "mov" => 2,
         "load" | "store" => 2,
@@ -608,7 +616,9 @@ fn estimate_completion(source: &str) -> f64 {
     let has_node = source.contains("@node");
     let has_params = source.contains("@params");
     let has_returns = source.contains("@returns");
-    let has_body = source.lines().any(|l| l.starts_with("  ") || l.starts_with('\t'));
+    let has_body = source
+        .lines()
+        .any(|l| l.starts_with("  ") || l.starts_with('\t'));
     let has_ret = source.contains(" ret ") || source.contains("\tret ");
 
     let parts = [has_node, has_params, has_returns, has_body, has_ret];
@@ -687,8 +697,14 @@ mod tests {
     #[test]
     fn test_infer_grammar_state() {
         assert_eq!(infer_grammar_state(""), GrammarState::Start);
-        assert_eq!(infer_grammar_state("@node"), GrammarState::ExpectingNodeName);
-        assert_eq!(infer_grammar_state("@node foo\n@params"), GrammarState::InsideParams);
+        assert_eq!(
+            infer_grammar_state("@node"),
+            GrammarState::ExpectingNodeName
+        );
+        assert_eq!(
+            infer_grammar_state("@node foo\n@params"),
+            GrammarState::InsideParams
+        );
     }
 
     #[test]
