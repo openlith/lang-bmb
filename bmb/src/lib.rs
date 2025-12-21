@@ -16,10 +16,13 @@ pub mod ai;
 pub mod ast;
 pub mod contracts;
 pub mod codegen;
+pub mod error;
 pub mod parser;
 pub mod types;
 
 use thiserror::Error;
+
+pub use error::{Diagnostic, ErrorCode};
 
 /// BMB compilation error types
 #[derive(Error, Debug)]
@@ -39,6 +42,43 @@ pub enum BmbError {
 
     #[error("Codegen error: {message}")]
     CodegenError { message: String },
+
+    /// Enhanced diagnostic error with full context
+    #[error("{0}")]
+    Diagnosed(Diagnostic),
+}
+
+impl BmbError {
+    /// Convert to diagnostic if available, or create a basic one
+    pub fn to_diagnostic(&self) -> Diagnostic {
+        match self {
+            BmbError::ParseError { line, column, message } => {
+                Diagnostic::new(ErrorCode::E002, message.clone())
+                    .with_span(crate::ast::Span::new(0, 0, *line, *column))
+            }
+            BmbError::TypeError { message } => {
+                Diagnostic::new(ErrorCode::E100, message.clone())
+            }
+            BmbError::ContractError { message } => {
+                Diagnostic::new(ErrorCode::E200, message.clone())
+            }
+            BmbError::CodegenError { message } => {
+                Diagnostic::new(ErrorCode::E300, message.clone())
+            }
+            BmbError::Diagnosed(diag) => diag.clone(),
+        }
+    }
+
+    /// Format error with source context
+    pub fn format_with_source(&self, source: &str) -> String {
+        self.to_diagnostic().format_with_source(source)
+    }
+}
+
+impl From<Diagnostic> for BmbError {
+    fn from(diag: Diagnostic) -> Self {
+        BmbError::Diagnosed(diag)
+    }
 }
 
 /// Result type for BMB operations

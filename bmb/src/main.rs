@@ -155,8 +155,24 @@ fn cmd_compile(file: PathBuf, level: String, emit: Option<String>, output: Optio
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("{}: {}", "error".red().bold(), e);
+            print_error(&e, &source);
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// Print a compilation error with source context
+fn print_error(e: &bmb::BmbError, source: &str) {
+    let formatted = e.format_with_source(source);
+    for line in formatted.lines() {
+        if line.starts_with("error") {
+            eprintln!("{}", line.red().bold());
+        } else if line.contains("help:") {
+            eprintln!("{}", line.cyan());
+        } else if line.contains("note:") {
+            eprintln!("{}", line.yellow());
+        } else {
+            eprintln!("{}", line);
         }
     }
 }
@@ -191,7 +207,7 @@ fn cmd_check(file: PathBuf, level: String) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("{}: {}", "error".red().bold(), e);
+            print_error(&e, &source);
             ExitCode::FAILURE
         }
     }
@@ -212,7 +228,7 @@ fn cmd_run(file: PathBuf, func: Option<String>, args: Vec<String>) -> ExitCode {
     let (wasm, _level) = match compile(&source) {
         Ok(result) => result,
         Err(e) => {
-            eprintln!("{}: {}", "error".red().bold(), e);
+            print_error(&e, &source);
             return ExitCode::FAILURE;
         }
     };
