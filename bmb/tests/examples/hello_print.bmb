@@ -1,0 +1,9 @@
+@node main
+@params
+@returns i32
+@pre true
+@post ret == 0
+
+  print "Hello, World!\n"
+  mov %result 0
+  ret %result

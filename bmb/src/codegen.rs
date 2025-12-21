@@ -66,8 +66,11 @@ impl CodeGenerator {
             let type_idx = self.register_import_type(import)?;
             self.function_indices
                 .insert(import.name.name.clone(), self.next_func_idx);
-            self.imports
-                .import("env", &import.name.name, wasm_encoder::EntityType::Function(type_idx));
+            self.imports.import(
+                "env",
+                &import.name.name,
+                wasm_encoder::EntityType::Function(type_idx),
+            );
             self.next_func_idx += 1;
         }
 
@@ -92,7 +95,11 @@ impl CodeGenerator {
     }
 
     fn register_import_type(&mut self, import: &crate::ast::Import) -> Result<u32> {
-        let params: Vec<ValType> = import.param_types.iter().map(|t| type_to_valtype(t)).collect();
+        let params: Vec<ValType> = import
+            .param_types
+            .iter()
+            .map(|t| type_to_valtype(t))
+            .collect();
         // Imported functions (like print_i32) don't return values
         let results: Vec<ValType> = vec![];
 
@@ -424,6 +431,14 @@ impl CodeGenerator {
                 // Memory operations - future expansion for linear memory
                 // For now, treat as no-op (BMB uses registers, not heap memory)
             }
+
+            Opcode::Print => {
+                // Print is not directly supported in WASM
+                // For x64 native compilation, use compile_to_x64() instead
+                return Err(BmbError::CodegenError {
+                    message: "print opcode is not supported in WASM. Use --emit elf for native x64 compilation.".to_string(),
+                });
+            }
         }
 
         Ok(())
@@ -633,6 +648,10 @@ impl CodeGenerator {
             }
             Operand::Label(_) => {
                 // Labels are not values, they're control flow targets
+            }
+            Operand::StringLiteral(_) => {
+                // String literals are only used with print opcode
+                // which is not supported in WASM
             }
         }
 
@@ -937,7 +956,10 @@ mod tests {
             register_types,
         );
 
-        let program = TypedProgram { imports: vec![], nodes: vec![node] };
+        let program = TypedProgram {
+            imports: vec![],
+            nodes: vec![node],
+        };
         let verified = VerifiedProgram { program };
 
         let wasm = generate(&verified).expect("codegen should succeed");
@@ -981,7 +1003,10 @@ mod tests {
             register_types,
         );
 
-        let program = TypedProgram { imports: vec![], nodes: vec![node] };
+        let program = TypedProgram {
+            imports: vec![],
+            nodes: vec![node],
+        };
         let verified = VerifiedProgram { program };
 
         let wasm = generate(&verified).expect("codegen should succeed");
@@ -1021,7 +1046,10 @@ mod tests {
             register_types,
         );
 
-        let program = TypedProgram { imports: vec![], nodes: vec![node] };
+        let program = TypedProgram {
+            imports: vec![],
+            nodes: vec![node],
+        };
         let verified = VerifiedProgram { program };
 
         let wasm = generate(&verified).expect("codegen should succeed");

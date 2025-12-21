@@ -18,7 +18,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ```bash
 # Clone the repository
-git clone https://github.com/openlith/bmb.git
+git clone https://github.com/openlith/lang-bmb.git
 cd bmb/bmb
 
 # Build the library

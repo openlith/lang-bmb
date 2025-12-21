@@ -119,14 +119,20 @@ fn optimize_expr(expr: Expr, level: OptLevel) -> Expr {
                 (UnaryOp::Neg, Expr::FloatLit(v)) => Expr::FloatLit(-v),
                 (UnaryOp::Not, Expr::BoolLit(b)) => Expr::BoolLit(!b),
                 // Double negation elimination
-                (UnaryOp::Neg, Expr::Unary {
-                    op: UnaryOp::Neg,
-                    operand: inner,
-                }) => *inner.clone(),
-                (UnaryOp::Not, Expr::Unary {
-                    op: UnaryOp::Not,
-                    operand: inner,
-                }) => *inner.clone(),
+                (
+                    UnaryOp::Neg,
+                    Expr::Unary {
+                        op: UnaryOp::Neg,
+                        operand: inner,
+                    },
+                ) => *inner.clone(),
+                (
+                    UnaryOp::Not,
+                    Expr::Unary {
+                        op: UnaryOp::Not,
+                        operand: inner,
+                    },
+                ) => *inner.clone(),
                 _ => Expr::Unary {
                     op,
                     operand: Box::new(operand),

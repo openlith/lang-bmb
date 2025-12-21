@@ -56,14 +56,18 @@ opcode = @{
     ("add" | "sub" | "mul" | "div" | "mod" |
      "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
      "ret" | "jmp" | "jif" | "call" | "xcall" |
-     "mov" | "load" | "store") ~ !ASCII_ALPHANUMERIC
+     "mov" | "load" | "store" | "print") ~ !ASCII_ALPHANUMERIC
 }
 
 // Operands
-operand = { register | label_ref | float_literal | int_literal | ident }
+operand = { register | label_ref | str_literal | float_literal | int_literal | ident }
 register = @{ "%" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
 // label_ref must NOT be followed by colon (that would be a label definition)
 label_ref = @{ "_" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ ~ !":" }
+// String literal with escape sequences
+str_literal = ${ "\"" ~ str_inner ~ "\"" }
+str_inner = @{ str_char* }
+str_char = { !("\"" | "\\") ~ ANY | "\\" ~ ("\"" | "\\" | "n" | "r" | "t" | "0") }
 
 // Types
 type_name = { "i32" | "i64" | "f32" | "f64" | "bool" }
@@ -99,7 +103,7 @@ reserved = @{
     ("add" | "sub" | "mul" | "div" | "mod" |
      "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
      "ret" | "jmp" | "jif" | "call" | "xcall" |
-     "mov" | "load" | "store" |
+     "mov" | "load" | "store" | "print" |
      "true" | "false") ~ !ASCII_ALPHANUMERIC
 }
 

@@ -1,0 +1,8 @@
+@node main
+@params
+@returns i32
+@pre true
+@post ret == 42
+
+  mov %result 42
+  ret %result

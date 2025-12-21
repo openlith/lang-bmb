@@ -6,7 +6,7 @@ rust-version = "1.75"
 description = "BMB (Bare-Metal-Banter) - A high-precision contract-first programming language targeting WebAssembly"
 license = "MIT"
 authors = ["AILL Project"]
-repository = "https://github.com/openlith/bmb"
+repository = "https://github.com/openlith/lang-bmb"
 publish = false
 
 [dependencies]

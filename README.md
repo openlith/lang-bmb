@@ -166,7 +166,7 @@ BMB's strict, unambiguous grammar makes it inherently suitable for LLM-based cod
 
 ```bash
 # Clone the repository
-git clone https://github.com/openlith/bmb.git
+git clone https://github.com/openlith/lang-bmb.git
 cd bmb/bmb
 
 # Build library only

@@ -23,6 +23,7 @@ pub mod lint;
 pub mod optimize;
 pub mod parser;
 pub mod types;
+pub mod x64;
 
 use thiserror::Error;
 
@@ -151,6 +152,123 @@ pub fn compile_with_opt(
     let wasm = codegen::generate(&optimized_ast)?;
 
     Ok((wasm, VerificationLevel::Silver))
+}
+
+/// Compile BMB source code to native x64 Linux ELF executable
+///
+/// This compiles BMB code directly to x64 machine code and wraps it in
+/// an ELF64 executable format. The resulting binary can run directly on
+/// Linux x86-64 systems without any runtime dependencies.
+///
+/// # Arguments
+///
+/// * `source` - The BMB source code to compile
+///
+/// # Returns
+///
+/// * The ELF64 executable bytes and verification level achieved
+///
+/// # Example
+///
+/// ```ignore
+/// let source = r#"
+/// @node main
+/// @params
+/// @returns i64
+///   mov %result 42
+///   ret %result
+/// "#;
+/// let (elf_bytes, level) = bmb::compile_to_x64(source)?;
+/// std::fs::write("output", &elf_bytes)?;
+/// ```
+pub fn compile_to_x64(source: &str) -> Result<(Vec<u8>, VerificationLevel)> {
+    compile_to_x64_with_opt(source, optimize::OptLevel::Basic)
+}
+
+/// Compile BMB source code to native x64 with specified optimization level
+pub fn compile_to_x64_with_opt(
+    source: &str,
+    opt_level: optimize::OptLevel,
+) -> Result<(Vec<u8>, VerificationLevel)> {
+    // Phase 1: Parse
+    let ast = parser::parse(source)?;
+
+    // Phase 2: Type check
+    let typed_ast = types::typecheck(&ast)?;
+
+    // Phase 3: Verify contracts
+    let mut verified_ast = contracts::verify(&typed_ast)?;
+
+    // Phase 4: Optimize
+    optimize::optimize(&mut verified_ast, opt_level);
+
+    // Phase 5: Generate x64 machine code
+    let mut codegen = x64::X64Codegen::new();
+    let code = codegen.compile_executable(&verified_ast.program)?;
+
+    // Phase 6: Wrap in ELF64 format
+    let elf = x64::Elf64Builder::new().code(code).build();
+
+    Ok((elf, VerificationLevel::Silver))
+}
+
+/// Compile BMB source code to native x64 Windows PE executable
+///
+/// This compiles BMB code directly to x64 machine code and wraps it in
+/// a PE64 executable format. The resulting binary can run directly on
+/// Windows x64 systems.
+///
+/// # Arguments
+///
+/// * `source` - The BMB source code to compile
+///
+/// # Returns
+///
+/// * The PE64 executable bytes and verification level achieved
+pub fn compile_to_pe(source: &str) -> Result<(Vec<u8>, VerificationLevel)> {
+    compile_to_pe_with_opt(source, optimize::OptLevel::Basic)
+}
+
+/// Compile BMB source code to Windows PE64 with specified optimization level
+pub fn compile_to_pe_with_opt(
+    source: &str,
+    opt_level: optimize::OptLevel,
+) -> Result<(Vec<u8>, VerificationLevel)> {
+    // Phase 1: Parse
+    let ast = parser::parse(source)?;
+
+    // Phase 2: Type check
+    let typed_ast = types::typecheck(&ast)?;
+
+    // Phase 3: Verify contracts
+    let mut verified_ast = contracts::verify(&typed_ast)?;
+
+    // Phase 4: Optimize
+    optimize::optimize(&mut verified_ast, opt_level);
+
+    // Phase 5: Calculate IAT RVAs for small programs (< 4KB code)
+    // For larger programs, we'd need a two-pass approach
+    let iat_rvas = x64::Pe64Builder::calculate_iat_rvas_small();
+
+    // Phase 6: Generate x64 machine code for Windows
+    let mut codegen = x64::X64Codegen::new();
+    let code = codegen.compile_executable_windows(&verified_ast.program, iat_rvas)?;
+
+    // Phase 7: Verify code fits in expected size
+    if code.len() > 0x1000 {
+        return Err(BmbError::CodegenError {
+            message: format!(
+                "Generated code ({} bytes) exceeds single page limit for fixed IAT layout. \
+                 Use a smaller program or wait for two-pass compilation support.",
+                code.len()
+            ),
+        });
+    }
+
+    // Phase 8: Wrap in PE64 format
+    let pe = x64::Pe64Builder::new().code(code).build();
+
+    Ok((pe, VerificationLevel::Silver))
 }
 
 #[cfg(test)]

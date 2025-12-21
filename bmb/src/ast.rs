@@ -108,6 +108,10 @@ pub enum Opcode {
     Mov,
     Load,
     Store,
+
+    // I/O
+    /// Print a string literal to stdout
+    Print,
 }
 
 impl fmt::Display for Opcode {
@@ -132,6 +136,7 @@ impl fmt::Display for Opcode {
             Opcode::Mov => write!(f, "mov"),
             Opcode::Load => write!(f, "load"),
             Opcode::Store => write!(f, "store"),
+            Opcode::Print => write!(f, "print"),
         }
     }
 }
@@ -147,6 +152,8 @@ pub enum Operand {
     IntLiteral(i64),
     /// Float literal: 3.14, 2.0
     FloatLiteral(f64),
+    /// String literal: "Hello, World!\n"
+    StringLiteral(String),
     /// Identifier (variable or function name)
     Identifier(Identifier),
 }

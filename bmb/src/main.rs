@@ -10,7 +10,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use bmb::{compile, compile_with_opt, VerificationLevel};
+use bmb::{
+    compile, compile_to_pe_with_opt, compile_to_x64_with_opt, compile_with_opt, VerificationLevel,
+};
 
 #[derive(Parser)]
 #[command(name = "bmbc")]
@@ -24,7 +26,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Compile a BMB source file to WebAssembly
+    /// Compile a BMB source file to WebAssembly or native x64
     Compile {
         /// Input BMB source file
         #[arg(value_name = "FILE")]
@@ -34,7 +36,7 @@ enum Commands {
         #[arg(long, default_value = "silver")]
         level: String,
 
-        /// Output format: wasm, wat, or ast
+        /// Output format: wasm, wat, ast, elf (Linux x64), or pe (Windows x64)
         #[arg(long)]
         emit: Option<String>,
 
@@ -208,6 +210,77 @@ fn cmd_compile(
         }
     };
 
+    // Handle elf/x64 output separately since it doesn't go through WASM
+    if matches!(emit.as_deref(), Some("elf") | Some("x64")) {
+        match compile_to_x64_with_opt(&source, opt_level) {
+            Ok((elf, level)) => {
+                let output_path = output.unwrap_or_else(|| {
+                    let mut p = file.clone();
+                    p.set_extension("elf");
+                    p
+                });
+                if let Err(e) = fs::write(&output_path, &elf) {
+                    eprintln!(
+                        "{}: could not write '{}': {}",
+                        "error".red().bold(),
+                        output_path.display(),
+                        e
+                    );
+                    return ExitCode::FAILURE;
+                }
+                println!(
+                    "{} {} -> {} ({}, native x64 Linux)",
+                    "Compiled".green().bold(),
+                    file.display(),
+                    output_path.display(),
+                    level
+                );
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                print_error(&e, &source);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    // Handle pe/exe output for Windows
+    if matches!(
+        emit.as_deref(),
+        Some("pe") | Some("exe") | Some("win") | Some("windows")
+    ) {
+        match compile_to_pe_with_opt(&source, opt_level) {
+            Ok((pe, level)) => {
+                let output_path = output.unwrap_or_else(|| {
+                    let mut p = file.clone();
+                    p.set_extension("exe");
+                    p
+                });
+                if let Err(e) = fs::write(&output_path, &pe) {
+                    eprintln!(
+                        "{}: could not write '{}': {}",
+                        "error".red().bold(),
+                        output_path.display(),
+                        e
+                    );
+                    return ExitCode::FAILURE;
+                }
+                println!(
+                    "{} {} -> {} ({}, native x64 Windows)",
+                    "Compiled".green().bold(),
+                    file.display(),
+                    output_path.display(),
+                    level
+                );
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                print_error(&e, &source);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
     match compile_with_opt(&source, opt_level) {
         Ok((wasm, achieved_level)) => {
             match emit.as_deref() {
@@ -273,7 +346,7 @@ fn cmd_compile(
                 }
                 Some(other) => {
                     eprintln!(
-                        "{}: unknown emit format '{}'. Use: wasm, wat, or ast",
+                        "{}: unknown emit format '{}'. Use: wasm, wat, ast, elf (Linux), or pe (Windows)",
                         "error".red().bold(),
                         other
                     );

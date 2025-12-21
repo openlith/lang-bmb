@@ -101,6 +101,6 @@ BMB follows [Semantic Versioning](https://semver.org/):
 | 1 | Bronze | Type safety |
 | 2 | Silver | Contract verification (runtime) |
 
-[Unreleased]: https://github.com/openlith/bmb/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/openlith/bmb/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/openlith/bmb/releases/tag/v0.1.0
+[Unreleased]: https://github.com/openlith/lang-bmb/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/openlith/lang-bmb/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/openlith/lang-bmb/releases/tag/v0.1.0

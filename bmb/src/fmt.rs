@@ -81,8 +81,26 @@ fn format_operand(operand: &Operand) -> String {
         Operand::Identifier(name) => name.name.clone(),
         Operand::IntLiteral(v) => v.to_string(),
         Operand::FloatLiteral(v) => format!("{:.1}", v),
+        Operand::StringLiteral(s) => format!("\"{}\"", escape_string(s)),
         Operand::Label(name) => format!("_{}", name.name),
     }
+}
+
+/// Escape special characters in a string for output
+fn escape_string(s: &str) -> String {
+    let mut result = String::new();
+    for c in s.chars() {
+        match c {
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            '\0' => result.push_str("\\0"),
+            '\\' => result.push_str("\\\\"),
+            '"' => result.push_str("\\\""),
+            _ => result.push(c),
+        }
+    }
+    result
 }
 
 /// Format an expression

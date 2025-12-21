@@ -10,7 +10,7 @@ Welcome to BMB! This tutorial will guide you through writing your first BMB prog
 
 ```bash
 # Clone the repository
-git clone https://github.com/openlith/bmb.git
+git clone https://github.com/openlith/lang-bmb.git
 cd bmb
 
 # Build the compiler

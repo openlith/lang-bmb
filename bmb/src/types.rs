@@ -336,6 +336,22 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
         Opcode::Load | Opcode::Store => {
             // Memory operations (future expansion)
         }
+
+        Opcode::Print => {
+            // Print: print "string literal"
+            if stmt.operands.len() != 1 {
+                return Err(BmbError::TypeError {
+                    message: format!("print requires 1 operand, got {}", stmt.operands.len()),
+                });
+            }
+
+            // Verify it's a string literal
+            if !matches!(stmt.operands[0], Operand::StringLiteral(_)) {
+                return Err(BmbError::TypeError {
+                    message: "print requires a string literal operand".to_string(),
+                });
+            }
+        }
     }
 
     Ok(())
@@ -360,6 +376,9 @@ fn get_operand_type(operand: &Operand, env: &TypeEnv) -> Result<Type> {
         Operand::FloatLiteral(_) => Ok(Type::F64), // Default float type
         Operand::Label(_) => Err(BmbError::TypeError {
             message: "Label cannot be used as value".to_string(),
+        }),
+        Operand::StringLiteral(_) => Err(BmbError::TypeError {
+            message: "String literal cannot be used as value (only with print)".to_string(),
         }),
     }
 }

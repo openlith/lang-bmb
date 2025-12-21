@@ -250,6 +250,7 @@ fn parse_opcode(pair: pest::iterators::Pair<Rule>) -> Result<Opcode> {
         "mov" => Ok(Opcode::Mov),
         "load" => Ok(Opcode::Load),
         "store" => Ok(Opcode::Store),
+        "print" => Ok(Opcode::Print),
         other => Err(BmbError::ParseError {
             line: 0,
             column: 0,
@@ -291,6 +292,14 @@ fn parse_operand(pair: pest::iterators::Pair<Rule>) -> Result<Operand> {
                 message: format!("Invalid float: {}", pair.as_str()),
             })?;
             Ok(Operand::FloatLiteral(value))
+        }
+        Rule::str_literal => {
+            // String literal: parse escape sequences
+            let raw = pair.as_str();
+            // Remove surrounding quotes
+            let inner = &raw[1..raw.len() - 1];
+            let parsed = parse_string_escapes(inner);
+            Ok(Operand::StringLiteral(parsed))
         }
         Rule::ident => Ok(Operand::Identifier(parse_identifier(pair)?)),
         _ => Err(BmbError::ParseError {
@@ -493,6 +502,38 @@ where
 
 fn parse_identifier(pair: pest::iterators::Pair<Rule>) -> Result<Identifier> {
     Ok(Identifier::new(pair.as_str(), pair_to_span(&pair)))
+}
+
+/// Parse escape sequences in a string literal
+fn parse_string_escapes(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(&next) = chars.peek() {
+                chars.next();
+                match next {
+                    'n' => result.push('\n'),
+                    'r' => result.push('\r'),
+                    't' => result.push('\t'),
+                    '0' => result.push('\0'),
+                    '\\' => result.push('\\'),
+                    '"' => result.push('"'),
+                    _ => {
+                        result.push('\\');
+                        result.push(next);
+                    }
+                }
+            } else {
+                result.push('\\');
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
 }
 
 fn pair_to_span(pair: &pest::iterators::Pair<Rule>) -> Span {

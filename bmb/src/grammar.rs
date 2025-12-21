@@ -366,30 +366,34 @@ impl BmbGrammar {
 
 /// Validate BMB source code quickly (for external tools)
 pub fn validate(source: &str) -> ValidationResult {
+    use crate::contracts;
     use crate::parser;
     use crate::types;
-    use crate::contracts;
 
     // Parse
     let ast = match parser::parse(source) {
         Ok(ast) => ast,
-        Err(e) => return ValidationResult {
-            valid: false,
-            level: ValidationLevel::None,
-            errors: vec![e.to_string()],
-            warnings: vec![],
-        },
+        Err(e) => {
+            return ValidationResult {
+                valid: false,
+                level: ValidationLevel::None,
+                errors: vec![e.to_string()],
+                warnings: vec![],
+            }
+        }
     };
 
     // Typecheck
     let typed = match types::typecheck(&ast) {
         Ok(typed) => typed,
-        Err(e) => return ValidationResult {
-            valid: false,
-            level: ValidationLevel::Stone,
-            errors: vec![e.to_string()],
-            warnings: vec![],
-        },
+        Err(e) => {
+            return ValidationResult {
+                valid: false,
+                level: ValidationLevel::Stone,
+                errors: vec![e.to_string()],
+                warnings: vec![],
+            }
+        }
     };
 
     // Contract verification
