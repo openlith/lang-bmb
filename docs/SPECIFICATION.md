@@ -18,7 +18,7 @@
 | **Explicit is Mandatory** | Clarity is a grammatical requirement, not a stylistic choice. | **Required** over Optional |
 | **Compile-time over Runtime** | Logic must be mathematically verifiable before execution. | **Static Verification** over Runtime Checks |
 | **Contracts are Code** | Formal specifications replace prose documentation. | **Executable Contract** over Text Doc |
-| **Writer Diligence** | Optimized for a tireless writer (AI) rather than human brevity. | **Precision** over Convenience |
+| **Precision over Convenience** | The language optimizes for correctness, not ergonomics. Verbosity is acceptable; ambiguity is not. | **Precision** over Convenience |
 
 ### 1.3 Decision Framework
 
@@ -31,7 +31,7 @@ When evaluating language features or implementation details, the **BMB Framework
 
 ### 1.4 Terminology
 
-* **Writer**: The entity generating BMB code (primarily AI, but includes high-precision human developers).
+* **Writer**: The entity generating BMB code—human developer, automated tool, or AI assistant. BMB makes no assumption about who writes the code.
 * **Tool**: The BMB ecosystem (Parser, Type Checker, SMT Solver, Codegen).
 
 ### 1.5 Code = Documentation

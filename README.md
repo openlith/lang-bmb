@@ -2,9 +2,9 @@
 
 > **"Omission is guessing, and guessing is error."**
 
-`BMB` is a high-precision programming language designed for bare-metal environments where ambiguity is the enemy. It eliminates the "human convenience" shortcuts that lead to runtime failures, replacing them with a rigid, verifiable contract system.
+`BMB` is a high-precision programming language designed for bare-metal environments where ambiguity is the enemy. It eliminates the "convenience" shortcuts that lead to runtime failures, replacing them with a rigid, verifiable contract system.
 
-While humans can write BMB, it is designed for a future where **correctness is non-negotiable** and **AI-driven synthesis** demands absolute specification.
+Traditional languages prioritize ergonomics—readable syntax, forgiving compilers, implicit behaviors. BMB takes the opposite stance: **correctness is non-negotiable**, and every convenience that compromises precision is removed. The result is a language that is harder to write, but nearly impossible to write incorrectly.
 
 ---
 
@@ -24,7 +24,7 @@ BMB does not assume intent. If it isn't in the code, it doesn't exist.
 
 ## Logic over Luck: Design by Contract
 
-In BMB, documentation and implementation are fused. The "Contract" is the source of truth, ensuring that the machine (and the AI writing for it) never operates in a vacuum.
+In BMB, documentation and implementation are fused. The "Contract" is the source of truth, ensuring that the code never operates in a vacuum of assumptions.
 
 ```bmb
 @node divide
@@ -39,7 +39,7 @@ In BMB, documentation and implementation are fused. The "Contract" is the source
 ```
 
 * **For the Architect:** You define the constraints once; the language enforces them forever.
-* **For the AI Assistant:** The lack of ambiguity allows AI to generate code with near-perfect success rates, as there is no "implied context" to hallucinate.
+* **For the Developer:** The rigid structure eliminates guesswork—if it compiles, it conforms to the specification.
 
 ---
 
@@ -58,8 +58,12 @@ BMB aims for the "One-Shot" development cycle. By making the language harder to 
 ## Use Cases
 
 1. **Safety-Critical Systems:** Where a single runtime error is a catastrophic failure.
-2. **AI-Generated Firmware:** Creating a "sandbox of logic" where AI-written code is pre-verified by strict contracts.
-3. **Bare-Metal Optimization:** Direct hardware control without the overhead of "safe" abstractions, replaced by "proven" abstractions.
+2. **Verified Firmware:** Direct hardware control with mathematically proven contracts replacing runtime checks.
+3. **High-Assurance Software:** Systems where formal verification is mandatory, not optional.
+
+### Why BMB Works Well with AI Code Generation
+
+BMB's strict, unambiguous grammar makes it inherently suitable for LLM-based code generation. Unlike languages with implicit behaviors and syntactic sugar, BMB leaves no room for "hallucinated" assumptions—what is written is exactly what is meant. This is a side effect of the language design, not its primary goal.
 
 ---
 

@@ -1,4 +1,7 @@
+# Local
 local-docs/
+.serena/
+CLAUDE.md
 
 # Rust/Cargo
 /bmb/target/
