@@ -29,6 +29,10 @@ colored = { version = "2.0", optional = true }
 wasmtime = { version = "27", optional = true }
 wasmprinter = { version = "0.220", optional = true }
 
+# SMT solver for static verification (optional)
+# Note: rsmt2 is a pure-Rust SMT-LIB interface that works with Z3, CVC4, etc.
+rsmt2 = { version = "0.16", optional = true }
+
 [dev-dependencies]
 # Testing utilities
 wasmtime = "27"
@@ -45,3 +49,4 @@ required-features = ["cli"]
 [features]
 default = []
 cli = ["dep:clap", "dep:colored", "dep:wasmtime", "dep:wasmprinter"]
+smt = ["dep:rsmt2"]

@@ -6,11 +6,12 @@
 //!
 //! ## Verification Levels
 //!
-//! | Level | Name   | Guarantee              |
-//! |-------|--------|------------------------|
-//! | 0     | Stone  | Parsing success        |
-//! | 1     | Bronze | Type safety            |
-//! | 2     | Silver | Contract verification  |
+//! | Level | Name   | Guarantee                     |
+//! |-------|--------|-------------------------------|
+//! | 0     | Stone  | Parsing success               |
+//! | 1     | Bronze | Type safety                   |
+//! | 2     | Silver | Runtime contract verification |
+//! | 3     | Gold   | Static contract proof (SMT)   |
 
 pub mod ai;
 pub mod ast;
@@ -22,6 +23,8 @@ pub mod grammar;
 pub mod lint;
 pub mod optimize;
 pub mod parser;
+#[cfg(feature = "smt")]
+pub mod smt;
 pub mod types;
 pub mod x64;
 
@@ -94,8 +97,10 @@ pub enum VerificationLevel {
     Stone = 0,
     /// Level 1: Type checking passed
     Bronze = 1,
-    /// Level 2: Contract verification passed
+    /// Level 2: Runtime contract verification passed
     Silver = 2,
+    /// Level 3: Static contract proof via SMT solver
+    Gold = 3,
 }
 
 impl std::fmt::Display for VerificationLevel {
@@ -104,6 +109,7 @@ impl std::fmt::Display for VerificationLevel {
             VerificationLevel::Stone => write!(f, "Stone (Level 0)"),
             VerificationLevel::Bronze => write!(f, "Bronze (Level 1)"),
             VerificationLevel::Silver => write!(f, "Silver (Level 2)"),
+            VerificationLevel::Gold => write!(f, "Gold (Level 3)"),
         }
     }
 }
@@ -279,6 +285,7 @@ mod tests {
     fn test_verification_level_ordering() {
         assert!(VerificationLevel::Stone < VerificationLevel::Bronze);
         assert!(VerificationLevel::Bronze < VerificationLevel::Silver);
+        assert!(VerificationLevel::Silver < VerificationLevel::Gold);
     }
 
     #[test]
@@ -286,5 +293,6 @@ mod tests {
         assert_eq!(VerificationLevel::Stone.to_string(), "Stone (Level 0)");
         assert_eq!(VerificationLevel::Bronze.to_string(), "Bronze (Level 1)");
         assert_eq!(VerificationLevel::Silver.to_string(), "Silver (Level 2)");
+        assert_eq!(VerificationLevel::Gold.to_string(), "Gold (Level 3)");
     }
 }
