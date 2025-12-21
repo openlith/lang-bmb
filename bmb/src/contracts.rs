@@ -449,10 +449,13 @@ mod tests {
 
         TypedProgram {
             imports: vec![],
+            structs: vec![],
+            enums: vec![],
             nodes: vec![TypedNode {
                 node,
                 register_types: HashMap::new(),
             }],
+            registry: crate::types::TypeRegistry::new(),
         }
     }
 

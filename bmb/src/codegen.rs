@@ -993,7 +993,10 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            structs: vec![],
+            enums: vec![],
             nodes: vec![node],
+            registry: crate::types::TypeRegistry::new(),
         };
         let verified = VerifiedProgram { program };
 
@@ -1040,7 +1043,10 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            structs: vec![],
+            enums: vec![],
             nodes: vec![node],
+            registry: crate::types::TypeRegistry::new(),
         };
         let verified = VerifiedProgram { program };
 
@@ -1083,7 +1089,10 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            structs: vec![],
+            enums: vec![],
             nodes: vec![node],
+            registry: crate::types::TypeRegistry::new(),
         };
         let verified = VerifiedProgram { program };
 

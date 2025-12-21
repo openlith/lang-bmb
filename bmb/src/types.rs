@@ -1,17 +1,73 @@
 //! BMB Type System
 //!
 //! Type checking and inference for BMB programs.
+//!
+//! "Omission is guessing, and guessing is error."
+//! - All types must be explicit and verifiable.
 
 use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::{BmbError, Result};
 
+/// Registry for user-defined types (structs and enums)
+#[derive(Debug, Clone, Default)]
+pub struct TypeRegistry {
+    /// Struct definitions by name
+    pub structs: HashMap<String, StructDef>,
+    /// Enum definitions by name
+    pub enums: HashMap<String, EnumDef>,
+}
+
+impl TypeRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a struct definition
+    pub fn add_struct(&mut self, def: StructDef) {
+        self.structs.insert(def.name.name.clone(), def);
+    }
+
+    /// Register an enum definition
+    pub fn add_enum(&mut self, def: EnumDef) {
+        self.enums.insert(def.name.name.clone(), def);
+    }
+
+    /// Get a struct definition by name
+    pub fn get_struct(&self, name: &str) -> Option<&StructDef> {
+        self.structs.get(name)
+    }
+
+    /// Get an enum definition by name
+    pub fn get_enum(&self, name: &str) -> Option<&EnumDef> {
+        self.enums.get(name)
+    }
+
+    /// Check if a type name is defined (either struct or enum)
+    pub fn is_defined(&self, name: &str) -> bool {
+        self.structs.contains_key(name) || self.enums.contains_key(name)
+    }
+
+    /// Get the type of a struct field
+    pub fn get_field_type(&self, struct_name: &str, field_name: &str) -> Option<&Type> {
+        self.structs.get(struct_name).and_then(|s| {
+            s.fields
+                .iter()
+                .find(|f| f.name.name == field_name)
+                .map(|f| &f.ty)
+        })
+    }
+}
+
 /// Type-checked AST (extends AST with type annotations)
 #[derive(Debug, Clone)]
 pub struct TypedProgram {
     pub imports: Vec<Import>,
+    pub structs: Vec<StructDef>,
+    pub enums: Vec<EnumDef>,
     pub nodes: Vec<TypedNode>,
+    pub registry: TypeRegistry,
 }
 
 /// A type-checked node
@@ -87,8 +143,44 @@ impl TypeEnv {
 pub fn typecheck(program: &Program) -> Result<TypedProgram> {
     let mut typed_nodes = Vec::new();
     let mut global_env = TypeEnv::new();
+    let mut registry = TypeRegistry::new();
 
-    // First pass: collect imported function signatures
+    // Phase 0: Build type registry from struct and enum definitions
+    for struct_def in &program.structs {
+        if registry.is_defined(&struct_def.name.name) {
+            return Err(BmbError::TypeError {
+                message: format!("Duplicate type definition: {}", struct_def.name.name),
+            });
+        }
+        registry.add_struct(struct_def.clone());
+    }
+
+    for enum_def in &program.enums {
+        if registry.is_defined(&enum_def.name.name) {
+            return Err(BmbError::TypeError {
+                message: format!("Duplicate type definition: {}", enum_def.name.name),
+            });
+        }
+        registry.add_enum(enum_def.clone());
+    }
+
+    // Phase 1: Validate struct field types exist
+    for struct_def in &program.structs {
+        for field in &struct_def.fields {
+            validate_type(&field.ty, &registry)?;
+        }
+    }
+
+    // Phase 2: Validate enum variant types exist
+    for enum_def in &program.enums {
+        for variant in &enum_def.variants {
+            if let Some(ref ty) = variant.payload {
+                validate_type(ty, &registry)?;
+            }
+        }
+    }
+
+    // Phase 3: Collect imported function signatures
     // Imported functions have no return type (void), modeled as dummy i32 for now
     for import in &program.imports {
         let sig = FunctionSig {
@@ -98,8 +190,15 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
         global_env.add_function(&import.name.name, sig);
     }
 
-    // Second pass: collect local function signatures
+    // Phase 4: Collect local function signatures (validate types first)
     for node in &program.nodes {
+        // Validate parameter types
+        for param in &node.params {
+            validate_type(&param.ty, &registry)?;
+        }
+        // Validate return type
+        validate_type(&node.returns, &registry)?;
+
         let sig = FunctionSig {
             params: node.params.iter().map(|p| p.ty.clone()).collect(),
             returns: node.returns.clone(),
@@ -107,19 +206,59 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
         global_env.add_function(&node.name.name, sig);
     }
 
-    // Third pass: type check each function
+    // Phase 5: Type check each function
     for node in &program.nodes {
-        let typed_node = typecheck_node(node, &global_env)?;
+        let typed_node = typecheck_node(node, &global_env, &registry)?;
         typed_nodes.push(typed_node);
     }
 
     Ok(TypedProgram {
         imports: program.imports.clone(),
+        structs: program.structs.clone(),
+        enums: program.enums.clone(),
         nodes: typed_nodes,
+        registry,
     })
 }
 
-fn typecheck_node(node: &Node, global_env: &TypeEnv) -> Result<TypedNode> {
+/// Validate that a type is well-formed (all referenced types exist)
+fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
+    match ty {
+        Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool | Type::Void => Ok(()),
+        Type::Array { element, size } => {
+            if *size == 0 {
+                return Err(BmbError::TypeError {
+                    message: "Array size must be greater than 0".to_string(),
+                });
+            }
+            validate_type(element, registry)
+        }
+        Type::Ref(inner) => validate_type(inner, registry),
+        Type::Struct(name) => {
+            if registry.get_struct(name).is_some() {
+                Ok(())
+            } else if registry.get_enum(name).is_some() {
+                // User wrote MyEnum but it's parsed as Struct - remap
+                Ok(())
+            } else {
+                Err(BmbError::TypeError {
+                    message: format!("Unknown type: {}", name),
+                })
+            }
+        }
+        Type::Enum(name) => {
+            if registry.get_enum(name).is_some() {
+                Ok(())
+            } else {
+                Err(BmbError::TypeError {
+                    message: format!("Unknown enum type: {}", name),
+                })
+            }
+        }
+    }
+}
+
+fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) -> Result<TypedNode> {
     let mut env = TypeEnv::new();
 
     // Copy function signatures
@@ -142,7 +281,7 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv) -> Result<TypedNode> {
                 // Labels don't affect types
             }
             Instruction::Statement(stmt) => {
-                typecheck_statement(stmt, &mut env, &node.returns)?;
+                typecheck_statement(stmt, &mut env, &node.returns, registry)?;
             }
         }
     }
@@ -172,7 +311,12 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv) -> Result<TypedNode> {
     })
 }
 
-fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) -> Result<()> {
+fn typecheck_statement(
+    stmt: &Statement,
+    env: &mut TypeEnv,
+    return_type: &Type,
+    registry: &TypeRegistry,
+) -> Result<()> {
     match stmt.opcode {
         Opcode::Add | Opcode::Sub | Opcode::Mul | Opcode::Div | Opcode::Mod => {
             // Arithmetic: %dest = op %a %b
@@ -187,7 +331,8 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
                 });
             }
 
-            let (type_a, type_b) = get_operand_types(&stmt.operands[1], &stmt.operands[2], env)?;
+            let (type_a, type_b) =
+                get_operand_types(&stmt.operands[1], &stmt.operands[2], env, registry)?;
 
             if type_a != type_b {
                 return Err(BmbError::TypeError {
@@ -217,7 +362,8 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
                 });
             }
 
-            let (type_a, type_b) = get_operand_types(&stmt.operands[1], &stmt.operands[2], env)?;
+            let (type_a, type_b) =
+                get_operand_types(&stmt.operands[1], &stmt.operands[2], env, registry)?;
 
             if type_a != type_b {
                 return Err(BmbError::TypeError {
@@ -241,7 +387,7 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
                 });
             }
 
-            let ret_type = get_operand_type(&stmt.operands[0], env)?;
+            let ret_type = get_operand_type(&stmt.operands[0], env, registry)?;
             if ret_type != *return_type {
                 return Err(BmbError::TypeError {
                     message: format!(
@@ -269,7 +415,7 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
                 });
             }
 
-            let cond_type = get_operand_type(&stmt.operands[0], env)?;
+            let cond_type = get_operand_type(&stmt.operands[0], env, registry)?;
             if cond_type != Type::Bool {
                 return Err(BmbError::TypeError {
                     message: format!("jif condition must be bool, got {}", cond_type),
@@ -327,7 +473,7 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
                 });
             }
 
-            let src_type = get_operand_type(&stmt.operands[1], env)?;
+            let src_type = get_operand_type(&stmt.operands[1], env, registry)?;
             if let Operand::Register(ref r) = stmt.operands[0] {
                 env.add_register(&r.name, src_type);
             }
@@ -357,7 +503,7 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
     Ok(())
 }
 
-fn get_operand_type(operand: &Operand, env: &TypeEnv) -> Result<Type> {
+fn get_operand_type(operand: &Operand, env: &TypeEnv, registry: &TypeRegistry) -> Result<Type> {
     match operand {
         Operand::Register(r) => env
             .get_type(&r.name)
@@ -381,35 +527,67 @@ fn get_operand_type(operand: &Operand, env: &TypeEnv) -> Result<Type> {
             message: "String literal cannot be used as value (only with print)".to_string(),
         }),
         Operand::FieldAccess { base, field } => {
-            // Get base type and look up field type
-            let base_type = env.get_type(&base.name).ok_or_else(|| BmbError::TypeError {
-                message: format!("Unknown variable: {}", base.name),
-            })?;
-            // For now, return a placeholder - full struct support needs type registry
-            Err(BmbError::TypeError {
-                message: format!(
-                    "Field access {}.{} requires struct type support (base: {:?})",
-                    base.name, field.name, base_type
-                ),
-            })
-        }
-        Operand::ArrayAccess { base, index: _ } => {
-            // Get base type and extract element type
+            // Get base type and look up field type in registry
             let base_type = env.get_type(&base.name).ok_or_else(|| BmbError::TypeError {
                 message: format!("Unknown variable: {}", base.name),
             })?;
             match base_type {
+                Type::Struct(struct_name) => {
+                    registry
+                        .get_field_type(struct_name, &field.name)
+                        .cloned()
+                        .ok_or_else(|| BmbError::TypeError {
+                            message: format!(
+                                "Unknown field '{}' in struct '{}'",
+                                field.name, struct_name
+                            ),
+                        })
+                }
+                _ => Err(BmbError::TypeError {
+                    message: format!(
+                        "Cannot access field '{}' on non-struct type: {}",
+                        field.name, base_type
+                    ),
+                }),
+            }
+        }
+        Operand::ArrayAccess { base, index } => {
+            // Get base type and extract element type
+            let base_type = env.get_type(&base.name).ok_or_else(|| BmbError::TypeError {
+                message: format!("Unknown variable: {}", base.name),
+            })?;
+
+            // Validate index type is integer
+            let index_type = get_operand_type(index, env, registry)?;
+            match index_type {
+                Type::I32 | Type::I64 => {}
+                _ => {
+                    return Err(BmbError::TypeError {
+                        message: format!("Array index must be integer, got {}", index_type),
+                    })
+                }
+            }
+
+            match base_type {
                 Type::Array { element, .. } => Ok(*element.clone()),
                 _ => Err(BmbError::TypeError {
-                    message: format!("Cannot index non-array type: {:?}", base_type),
+                    message: format!("Cannot index non-array type: {}", base_type),
                 }),
             }
         }
     }
 }
 
-fn get_operand_types(a: &Operand, b: &Operand, env: &TypeEnv) -> Result<(Type, Type)> {
-    Ok((get_operand_type(a, env)?, get_operand_type(b, env)?))
+fn get_operand_types(
+    a: &Operand,
+    b: &Operand,
+    env: &TypeEnv,
+    registry: &TypeRegistry,
+) -> Result<(Type, Type)> {
+    Ok((
+        get_operand_type(a, env, registry)?,
+        get_operand_type(b, env, registry)?,
+    ))
 }
 
 /// Determine the common type for comparison, with literal promotion
@@ -668,5 +846,116 @@ _less:
         let program = parser::parse(source).unwrap();
         let result = typecheck(&program);
         assert!(result.is_ok(), "Type check failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_typecheck_struct_definition() {
+        let source = r#"
+@struct Point
+  x:i32
+  y:i32
+
+@node distance
+@params p:Point
+@returns i32
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Struct typecheck failed: {:?}", result.err());
+
+        let typed = result.unwrap();
+        assert_eq!(typed.structs.len(), 1);
+        assert!(typed.registry.get_struct("Point").is_some());
+    }
+
+    #[test]
+    fn test_typecheck_unknown_type_error() {
+        let source = r#"
+@node bad
+@params x:UnknownType
+@returns i32
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_err(), "Should fail for unknown type");
+
+        if let Err(BmbError::TypeError { message }) = result {
+            assert!(
+                message.contains("Unknown type"),
+                "Should mention unknown type: {}",
+                message
+            );
+        }
+    }
+
+    #[test]
+    fn test_typecheck_enum_definition() {
+        let source = r#"
+@enum Color
+  Red
+  Green
+  Blue
+
+@node get_color
+@params
+@returns i32
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Enum typecheck failed: {:?}", result.err());
+
+        let typed = result.unwrap();
+        assert_eq!(typed.enums.len(), 1);
+        assert!(typed.registry.get_enum("Color").is_some());
+    }
+
+    #[test]
+    fn test_typecheck_array_type() {
+        let source = r#"
+@node process_array
+@params arr:[i32; 10]
+@returns i32
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Array typecheck failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_type_registry_field_lookup() {
+        let mut registry = TypeRegistry::new();
+        registry.add_struct(StructDef {
+            name: Identifier {
+                name: "Point".to_string(),
+                span: Span::default(),
+            },
+            fields: vec![
+                StructField {
+                    name: Identifier {
+                        name: "x".to_string(),
+                        span: Span::default(),
+                    },
+                    ty: Type::I32,
+                    span: Span::default(),
+                },
+                StructField {
+                    name: Identifier {
+                        name: "y".to_string(),
+                        span: Span::default(),
+                    },
+                    ty: Type::F64,
+                    span: Span::default(),
+                },
+            ],
+            span: Span::default(),
+        });
+
+        assert_eq!(registry.get_field_type("Point", "x"), Some(&Type::I32));
+        assert_eq!(registry.get_field_type("Point", "y"), Some(&Type::F64));
+        assert_eq!(registry.get_field_type("Point", "z"), None);
     }
 }
