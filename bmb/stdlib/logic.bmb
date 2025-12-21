@@ -1,0 +1,137 @@
+# BMB Standard Library: Logic and Comparison Functions
+# "Omission is guessing, and guessing is error."
+
+@node bool_to_int
+@params b:bool
+@returns i32
+@pre true
+@post (b && ret == 1) || (!b && ret == 0)
+
+  jif b _true
+  mov %r 0
+  ret %r
+_true:
+  mov %r 1
+  ret %r
+
+@node is_even
+@params x:i32
+@returns bool
+@pre true
+@post true
+
+  mod %rem x 2
+  eq %result %rem 0
+  ret %result
+
+@node is_odd
+@params x:i32
+@returns bool
+@pre true
+@post true
+
+  mod %rem x 2
+  ne %result %rem 0
+  ret %result
+
+@node is_positive
+@params x:i32
+@returns bool
+@pre true
+@post (ret && x > 0) || (!ret && x <= 0)
+
+  gt %result x 0
+  ret %result
+
+@node is_negative
+@params x:i32
+@returns bool
+@pre true
+@post (ret && x < 0) || (!ret && x >= 0)
+
+  lt %result x 0
+  ret %result
+
+@node is_zero
+@params x:i32
+@returns bool
+@pre true
+@post (ret && x == 0) || (!ret && x != 0)
+
+  eq %result x 0
+  ret %result
+
+@node in_range
+@params x:i32 low:i32 high:i32
+@returns bool
+@pre low <= high
+@post true
+
+  lt %below x low
+  jif %below _false
+  gt %above x high
+  jif %above _false
+  # Return true by computing 1 == 1
+  eq %result 1 1
+  ret %result
+_false:
+  # Return false by computing 1 == 0
+  eq %result 1 0
+  ret %result
+
+@node xor_bool
+@params a:bool b:bool
+@returns bool
+@pre true
+@post true
+
+  # XOR: (a && !b) || (!a && b)
+  # Simplified: a != b for booleans
+  jif a _a_true
+  # a is false, return b
+  ret b
+_a_true:
+  # a is true, return !b
+  jif b _both_true
+  # b is false, return true (1 == 1)
+  eq %r 1 1
+  ret %r
+_both_true:
+  # both true, return false (1 == 0)
+  eq %r 1 0
+  ret %r
+
+@node nand
+@params a:bool b:bool
+@returns bool
+@pre true
+@post true
+
+  jif a _check_b
+  # a is false, NAND is true
+  eq %r 1 1
+  ret %r
+_check_b:
+  jif b _both_true
+  # a is true, b is false, NAND is true
+  eq %r 1 1
+  ret %r
+_both_true:
+  # both true, NAND is false
+  eq %r 1 0
+  ret %r
+
+@node nor
+@params a:bool b:bool
+@returns bool
+@pre true
+@post true
+
+  jif a _false
+  jif b _false
+  # both false, NOR is true
+  eq %r 1 1
+  ret %r
+_false:
+  eq %r 1 0
+  ret %r

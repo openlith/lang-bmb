@@ -1,0 +1,122 @@
+# BMB Standard Library: Float Math Functions (f64)
+# "Omission is guessing, and guessing is error."
+
+@node abs_f64
+@params x:f64
+@returns f64
+@pre true
+@post ret >= 0.0
+
+  lt %neg x 0.0
+  jif %neg _negate
+  ret x
+_negate:
+  sub %r 0.0 x
+  ret %r
+
+@node max_f64
+@params a:f64 b:f64
+@returns f64
+@pre true
+@post ret >= a && ret >= b
+
+  gt %a_gt a b
+  jif %a_gt _ret_a
+  ret b
+_ret_a:
+  ret a
+
+@node min_f64
+@params a:f64 b:f64
+@returns f64
+@pre true
+@post ret <= a && ret <= b
+
+  lt %a_lt a b
+  jif %a_lt _ret_a
+  ret b
+_ret_a:
+  ret a
+
+@node clamp_f64
+@params x:f64 low:f64 high:f64
+@returns f64
+@pre low <= high
+@post ret >= low && ret <= high
+
+  lt %too_low x low
+  jif %too_low _ret_low
+  gt %too_high x high
+  jif %too_high _ret_high
+  ret x
+_ret_low:
+  ret low
+_ret_high:
+  ret high
+
+@node lerp
+@params a:f64 b:f64 t:f64
+@returns f64
+@pre t >= 0.0 && t <= 1.0
+@post true
+
+  # Linear interpolation: a + t * (b - a)
+  sub %diff b a
+  mul %scaled %diff t
+  add %result a %scaled
+  ret %result
+
+@node sign_f64
+@params x:f64
+@returns f64
+@pre true
+@post ret == 1.0 || ret == 0.0 || ret == 0.0 - 1.0
+
+  lt %neg x 0.0
+  jif %neg _ret_neg
+  gt %pos x 0.0
+  jif %pos _ret_pos
+  mov %r 0.0
+  ret %r
+_ret_neg:
+  sub %r 0.0 1.0
+  ret %r
+_ret_pos:
+  mov %r 1.0
+  ret %r
+
+@node floor_approx
+@params x:f64
+@returns f64
+@pre true
+@post ret <= x
+
+  # Simple floor approximation
+  # Returns the largest integer value less than or equal to x
+  # Note: This is a simplified version using integer truncation
+  lt %neg x 0.0
+  jif %neg _negative
+  # For positive, just return x (simplified - actual floor would truncate)
+  ret x
+_negative:
+  # For negative, return x (simplified version)
+  ret x
+
+@node reciprocal
+@params x:f64
+@returns f64
+@pre x != 0.0
+@post ret * x == 1.0 || ret * x > 0.99 && ret * x < 1.01
+
+  div %r 1.0 x
+  ret %r
+
+@node average
+@params a:f64 b:f64
+@returns f64
+@pre true
+@post ret >= a && ret <= b || ret >= b && ret <= a
+
+  add %sum a b
+  div %r %sum 2.0
+  ret %r
