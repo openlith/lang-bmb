@@ -1,0 +1,40 @@
+# BMB Fibonacci Print Example
+# Prints fibonacci numbers up to fib(10)
+
+@import print_i32(i32)
+@import print_char(i32)
+@import print_newline()
+
+# Calculate nth fibonacci number
+@node fibonacci
+@params n:i32
+@returns i32
+@pre n >= 0
+@post ret >= 0
+
+  eq %is_zero n 0
+  jif %is_zero _zero
+  eq %is_one n 1
+  jif %is_one _one
+  sub %n1 n 1
+  sub %n2 n 2
+  call %fib1 fibonacci %n1
+  call %fib2 fibonacci %n2
+  add %r %fib1 %fib2
+  ret %r
+_zero:
+  ret 0
+_one:
+  ret 1
+
+# Print fibonacci(n) where n is the input
+@node print_fib
+@params n:i32
+@returns i32
+@pre n >= 0
+@post ret >= 0
+
+  call %result fibonacci n
+  xcall print_i32 %result
+  xcall print_newline
+  ret %result

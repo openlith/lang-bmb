@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction,
-    Module, TypeSection, ValType,
+    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection,
+    Instruction, Module, TypeSection, ValType,
 };
 
 use crate::ast::{self, Node, Opcode, Operand, Statement, Type};
@@ -35,11 +35,13 @@ pub fn generate(program: &VerifiedProgram) -> Result<Vec<u8>> {
 struct CodeGenerator {
     module: Module,
     types: TypeSection,
+    imports: ImportSection,
     functions: FunctionSection,
     exports: ExportSection,
     code: CodeSection,
     function_indices: HashMap<String, u32>,
     next_func_idx: u32,
+    next_type_idx: u32,
 }
 
 impl CodeGenerator {
@@ -47,16 +49,29 @@ impl CodeGenerator {
         Self {
             module: Module::new(),
             types: TypeSection::new(),
+            imports: ImportSection::new(),
             functions: FunctionSection::new(),
             exports: ExportSection::new(),
             code: CodeSection::new(),
             function_indices: HashMap::new(),
             next_func_idx: 0,
+            next_type_idx: 0,
         }
     }
 
     fn generate_program(&mut self, program: &crate::types::TypedProgram) -> Result<()> {
-        // First pass: register all function types
+        // First pass: register imported functions
+        // Imported functions take function indices before local functions
+        for import in &program.imports {
+            let type_idx = self.register_import_type(import)?;
+            self.function_indices
+                .insert(import.name.name.clone(), self.next_func_idx);
+            self.imports
+                .import("env", &import.name.name, wasm_encoder::EntityType::Function(type_idx));
+            self.next_func_idx += 1;
+        }
+
+        // Second pass: register local function types
         for typed_node in &program.nodes {
             let node = &typed_node.node;
             let type_idx = self.register_function_type(node)?;
@@ -68,7 +83,7 @@ impl CodeGenerator {
             self.next_func_idx += 1;
         }
 
-        // Second pass: generate function bodies
+        // Third pass: generate function bodies
         for typed_node in &program.nodes {
             self.generate_function(typed_node)?;
         }
@@ -76,12 +91,24 @@ impl CodeGenerator {
         Ok(())
     }
 
+    fn register_import_type(&mut self, import: &crate::ast::Import) -> Result<u32> {
+        let params: Vec<ValType> = import.param_types.iter().map(|t| type_to_valtype(t)).collect();
+        // Imported functions (like print_i32) don't return values
+        let results: Vec<ValType> = vec![];
+
+        let type_idx = self.next_type_idx;
+        self.types.ty().function(params, results);
+        self.next_type_idx += 1;
+        Ok(type_idx)
+    }
+
     fn register_function_type(&mut self, node: &Node) -> Result<u32> {
         let params: Vec<ValType> = node.params.iter().map(|p| type_to_valtype(&p.ty)).collect();
         let results = vec![type_to_valtype(&node.returns)];
 
-        let type_idx = self.types.len();
+        let type_idx = self.next_type_idx;
         self.types.ty().function(params, results);
+        self.next_type_idx += 1;
         Ok(type_idx)
     }
 
@@ -355,6 +382,34 @@ impl CodeGenerator {
                 }
             }
 
+            Opcode::Xcall => {
+                // xcall function_name args...
+                // External call to void function (no return value)
+                // First operand is function name, rest are arguments
+                let func_name = match &stmt.operands[0] {
+                    Operand::Identifier(id) => &id.name,
+                    _ => {
+                        return Err(BmbError::CodegenError {
+                            message: "Xcall requires function name".to_string(),
+                        })
+                    }
+                };
+
+                // Push arguments (operands 1..)
+                for operand in stmt.operands.iter().skip(1) {
+                    self.generate_operand(operand, func, ctx)?;
+                }
+
+                // Call function (no return value to store)
+                if let Some(&func_idx) = ctx.function_indices.get(func_name) {
+                    func.instruction(&Instruction::Call(func_idx));
+                } else {
+                    return Err(BmbError::CodegenError {
+                        message: format!("Unknown function: {}", func_name),
+                    });
+                }
+            }
+
             Opcode::Mov => {
                 // mov dest src
                 self.generate_operand(&stmt.operands[1], func, ctx)?;
@@ -586,6 +641,10 @@ impl CodeGenerator {
 
     fn finish(mut self) -> Vec<u8> {
         self.module.section(&self.types);
+        // Import section must come before function section
+        if self.imports.len() > 0 {
+            self.module.section(&self.imports);
+        }
         self.module.section(&self.functions);
         self.module.section(&self.exports);
         self.module.section(&self.code);
@@ -878,7 +937,7 @@ mod tests {
             register_types,
         );
 
-        let program = TypedProgram { nodes: vec![node] };
+        let program = TypedProgram { imports: vec![], nodes: vec![node] };
         let verified = VerifiedProgram { program };
 
         let wasm = generate(&verified).expect("codegen should succeed");
@@ -922,7 +981,7 @@ mod tests {
             register_types,
         );
 
-        let program = TypedProgram { nodes: vec![node] };
+        let program = TypedProgram { imports: vec![], nodes: vec![node] };
         let verified = VerifiedProgram { program };
 
         let wasm = generate(&verified).expect("codegen should succeed");
@@ -962,7 +1021,7 @@ mod tests {
             register_types,
         );
 
-        let program = TypedProgram { nodes: vec![node] };
+        let program = TypedProgram { imports: vec![], nodes: vec![node] };
         let verified = VerifiedProgram { program };
 
         let wasm = generate(&verified).expect("codegen should succeed");

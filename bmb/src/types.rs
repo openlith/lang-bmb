@@ -10,6 +10,7 @@ use crate::{BmbError, Result};
 /// Type-checked AST (extends AST with type annotations)
 #[derive(Debug, Clone)]
 pub struct TypedProgram {
+    pub imports: Vec<Import>,
     pub nodes: Vec<TypedNode>,
 }
 
@@ -87,7 +88,17 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
     let mut typed_nodes = Vec::new();
     let mut global_env = TypeEnv::new();
 
-    // First pass: collect function signatures
+    // First pass: collect imported function signatures
+    // Imported functions have no return type (void), modeled as dummy i32 for now
+    for import in &program.imports {
+        let sig = FunctionSig {
+            params: import.param_types.clone(),
+            returns: Type::I32, // Void functions return nothing, but we need a type for now
+        };
+        global_env.add_function(&import.name.name, sig);
+    }
+
+    // Second pass: collect local function signatures
     for node in &program.nodes {
         let sig = FunctionSig {
             params: node.params.iter().map(|p| p.ty.clone()).collect(),
@@ -96,13 +107,16 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
         global_env.add_function(&node.name.name, sig);
     }
 
-    // Second pass: type check each function
+    // Third pass: type check each function
     for node in &program.nodes {
         let typed_node = typecheck_node(node, &global_env)?;
         typed_nodes.push(typed_node);
     }
 
-    Ok(TypedProgram { nodes: typed_nodes })
+    Ok(TypedProgram {
+        imports: program.imports.clone(),
+        nodes: typed_nodes,
+    })
 }
 
 fn typecheck_node(node: &Node, global_env: &TypeEnv) -> Result<TypedNode> {
@@ -284,6 +298,25 @@ fn typecheck_statement(stmt: &Statement, env: &mut TypeEnv, return_type: &Type) 
                     });
                 }
             }
+        }
+
+        Opcode::Xcall => {
+            // External call to void function: xcall func %args...
+            if stmt.operands.is_empty() {
+                return Err(BmbError::TypeError {
+                    message: "xcall requires at least 1 operand (function name)".to_string(),
+                });
+            }
+
+            // First operand is function name
+            if let Operand::Identifier(ref func) = stmt.operands[0] {
+                if env.get_function(&func.name).is_none() {
+                    return Err(BmbError::TypeError {
+                        message: format!("Unknown function: {}", func.name),
+                    });
+                }
+            }
+            // No result register - void function
         }
 
         Opcode::Mov => {

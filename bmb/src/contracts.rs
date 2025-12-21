@@ -431,6 +431,7 @@ mod tests {
         };
 
         TypedProgram {
+            imports: vec![],
             nodes: vec![TypedNode {
                 node,
                 register_types: HashMap::new(),

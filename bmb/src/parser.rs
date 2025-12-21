@@ -34,12 +34,16 @@ pub fn parse(source: &str) -> Result<Program> {
         }
     })?;
 
+    let mut imports = Vec::new();
     let mut nodes = Vec::new();
 
     // Get the program pair and iterate over its inner pairs
     if let Some(program_pair) = pairs.next() {
         for pair in program_pair.into_inner() {
             match pair.as_rule() {
+                Rule::import => {
+                    imports.push(parse_import(pair)?);
+                }
                 Rule::node => {
                     nodes.push(parse_node(pair)?);
                 }
@@ -49,7 +53,30 @@ pub fn parse(source: &str) -> Result<Program> {
         }
     }
 
-    Ok(Program { nodes })
+    Ok(Program { imports, nodes })
+}
+
+fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name = parse_identifier(inner.next().unwrap())?;
+
+    // Parse parameter types (optional)
+    let mut param_types = Vec::new();
+    if let Some(import_params) = inner.next() {
+        if import_params.as_rule() == Rule::import_params {
+            for type_pair in import_params.into_inner() {
+                param_types.push(parse_type(type_pair)?);
+            }
+        }
+    }
+
+    Ok(Import {
+        name,
+        param_types,
+        span,
+    })
 }
 
 fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
@@ -219,6 +246,7 @@ fn parse_opcode(pair: pest::iterators::Pair<Rule>) -> Result<Opcode> {
         "jmp" => Ok(Opcode::Jmp),
         "jif" => Ok(Opcode::Jif),
         "call" => Ok(Opcode::Call),
+        "xcall" => Ok(Opcode::Xcall),
         "mov" => Ok(Opcode::Mov),
         "load" => Ok(Opcode::Load),
         "store" => Ok(Opcode::Store),

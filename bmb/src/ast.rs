@@ -4,10 +4,19 @@
 
 use std::fmt;
 
-/// A complete BMB program consisting of one or more nodes
+/// A complete BMB program consisting of imports and nodes
 #[derive(Debug, Clone)]
 pub struct Program {
+    pub imports: Vec<Import>,
     pub nodes: Vec<Node>,
+}
+
+/// An external function import
+#[derive(Debug, Clone)]
+pub struct Import {
+    pub name: Identifier,
+    pub param_types: Vec<Type>,
+    pub span: Span,
 }
 
 /// A function node in BMB
@@ -92,6 +101,8 @@ pub enum Opcode {
     Jmp,
     Jif,
     Call,
+    /// External call (void function, no return value)
+    Xcall,
 
     // Variables
     Mov,
@@ -117,6 +128,7 @@ impl fmt::Display for Opcode {
             Opcode::Jmp => write!(f, "jmp"),
             Opcode::Jif => write!(f, "jif"),
             Opcode::Call => write!(f, "call"),
+            Opcode::Xcall => write!(f, "xcall"),
             Opcode::Mov => write!(f, "mov"),
             Opcode::Load => write!(f, "load"),
             Opcode::Store => write!(f, "store"),

@@ -387,8 +387,55 @@ fn cmd_run(file: PathBuf, func: Option<String>, args: Vec<String>) -> ExitCode {
         }
     };
 
+    // Create linker with host functions
+    let mut linker = Linker::new(&engine);
+
+    // Register print_i32: prints an i32 value
+    linker
+        .func_wrap("env", "print_i32", |val: i32| {
+            print!("{}", val);
+        })
+        .expect("failed to define print_i32");
+
+    // Register print_i64: prints an i64 value
+    linker
+        .func_wrap("env", "print_i64", |val: i64| {
+            print!("{}", val);
+        })
+        .expect("failed to define print_i64");
+
+    // Register print_f32: prints an f32 value
+    linker
+        .func_wrap("env", "print_f32", |val: f32| {
+            print!("{}", val);
+        })
+        .expect("failed to define print_f32");
+
+    // Register print_f64: prints an f64 value
+    linker
+        .func_wrap("env", "print_f64", |val: f64| {
+            print!("{}", val);
+        })
+        .expect("failed to define print_f64");
+
+    // Register print_char: prints a character (i32 as ASCII)
+    linker
+        .func_wrap("env", "print_char", |val: i32| {
+            if let Some(c) = char::from_u32(val as u32) {
+                print!("{}", c);
+            }
+        })
+        .expect("failed to define print_char");
+
+    // Register print_newline: prints a newline
+    linker
+        .func_wrap("env", "print_newline", || {
+            println!();
+        })
+        .expect("failed to define print_newline");
+
     let mut store = Store::new(&engine, ());
-    let instance = match Instance::new(&mut store, &module, &[]) {
+    let instance = match linker.instantiate(&mut store, &module) {
         Ok(i) => i,
         Err(e) => {
             eprintln!(

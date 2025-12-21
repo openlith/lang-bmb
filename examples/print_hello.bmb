@@ -1,0 +1,15 @@
+# BMB Print Example
+# Prints "42" and returns 42
+
+@import print_i32(i32)
+@import print_newline()
+
+@node main
+@params
+@returns i32
+@pre true
+@post ret == 42
+
+  xcall print_i32 42
+  xcall print_newline
+  ret 42

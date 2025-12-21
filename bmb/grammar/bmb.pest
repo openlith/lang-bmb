@@ -8,7 +8,17 @@ WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
 // Program structure
-program = { SOI ~ node* ~ EOI }
+program = { SOI ~ import* ~ node* ~ EOI }
+
+// External function imports
+// Example: @import print_i32(i32)
+// Example: @import print_newline()
+import = {
+    "@import" ~ ident ~ "(" ~ import_params? ~ ")"
+}
+
+// Import parameter types (no names, just types)
+import_params = { type_name ~ ("," ~ type_name)* }
 
 // Node (function) definition
 node = {
@@ -45,7 +55,7 @@ stmt = { opcode ~ operand* }
 opcode = @{
     ("add" | "sub" | "mul" | "div" | "mod" |
      "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
-     "ret" | "jmp" | "jif" | "call" |
+     "ret" | "jmp" | "jif" | "call" | "xcall" |
      "mov" | "load" | "store") ~ !ASCII_ALPHANUMERIC
 }
 
@@ -88,7 +98,7 @@ bool_literal = { "true" | "false" }
 reserved = @{
     ("add" | "sub" | "mul" | "div" | "mod" |
      "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
-     "ret" | "jmp" | "jif" | "call" |
+     "ret" | "jmp" | "jif" | "call" | "xcall" |
      "mov" | "load" | "store" |
      "true" | "false") ~ !ASCII_ALPHANUMERIC
 }
