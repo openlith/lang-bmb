@@ -1,8 +1,8 @@
 [package]
 name = "bmb"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "BMB (Bare-Metal-Banter) - A contract-first programming language for AI"
+description = "BMB (Bare-Metal-Banter) - A high-precision contract-first programming language"
 license = "MIT"
 authors = ["AILL Project"]
 repository = "https://github.com/openlith/bmb"
@@ -18,8 +18,10 @@ wasm-encoder = "0.220"
 # Error handling
 thiserror = "2.0"
 
-# CLI (future)
-# clap = { version = "4.4", features = ["derive"] }
+# CLI dependencies (optional)
+clap = { version = "4.4", features = ["derive"], optional = true }
+colored = { version = "2.0", optional = true }
+wasmtime = { version = "27", optional = true }
 
 [dev-dependencies]
 # Testing utilities
@@ -36,4 +38,4 @@ required-features = ["cli"]
 
 [features]
 default = []
-cli = []
+cli = ["dep:clap", "dep:colored", "dep:wasmtime"]

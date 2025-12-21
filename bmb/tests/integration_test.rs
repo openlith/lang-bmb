@@ -477,3 +477,86 @@ fn test_combined_pre_and_post() {
     let result = bounded_increment.call(&mut store, -1);
     assert!(result.is_err(), "should trap on precondition violation");
 }
+
+#[test]
+fn test_execute_loop_with_jmp() {
+    let source = r#"
+# Loop using jmp for backward jump
+@node loop_demo
+@params
+@returns i32
+@pre true
+@post ret == 10
+
+  mov %count 0
+_loop:
+  add %count %count 1
+  lt %continue %count 10
+  jif %continue _loop
+  ret %count
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let loop_demo = instance
+        .get_typed_func::<(), i32>(&mut store, "loop_demo")
+        .expect("loop_demo function not found");
+
+    // Test: loop increments until count == 10
+    let result = loop_demo.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 10);
+}
+
+#[test]
+fn test_execute_nested_loops() {
+    // Nested loops using only backward jumps (no forward jumps yet)
+    // Pattern: outer loop runs inner loop completely each iteration
+    // Total iterations = outer * inner
+    let source = r#"
+# Nested loops: multiply via counting
+# Uses only backward jumps - no forward jump blocks needed
+@node nested_loop
+@params outer:i32 inner:i32
+@returns i32
+@pre outer >= 0
+@pre inner >= 0
+
+  mov %total 0
+  mov %i 0
+_outer_loop:
+  mov %j 0
+_inner_loop:
+  add %total %total 1
+  add %j %j 1
+  lt %inner_continue %j inner
+  jif %inner_continue _inner_loop
+  add %i %i 1
+  lt %outer_continue %i outer
+  jif %outer_continue _outer_loop
+  ret %total
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let nested_loop = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "nested_loop")
+        .expect("nested_loop function not found");
+
+    // Test: 3 * 4 = 12 total iterations
+    let result = nested_loop.call(&mut store, (3, 4)).expect("call failed");
+    assert_eq!(result, 12);
+
+    // Test: 5 * 5 = 25 total iterations
+    let result = nested_loop.call(&mut store, (5, 5)).expect("call failed");
+    assert_eq!(result, 25);
+}

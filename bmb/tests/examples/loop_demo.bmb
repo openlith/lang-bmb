@@ -1,0 +1,12 @@
+@node loop_demo
+@params
+@returns i32
+@pre true
+@post ret == 10
+
+  mov %count 0
+_loop:
+  add %count %count 1
+  lt %continue %count 10
+  jif %continue _loop
+  ret %count

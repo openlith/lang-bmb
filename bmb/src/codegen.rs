@@ -154,10 +154,10 @@ impl CodeGenerator {
         };
 
         // Analyze control flow for labels
-        let label_blocks = analyze_control_flow(&node.body);
+        let cf = analyze_control_flow(&node.body);
 
         // Generate instructions
-        self.generate_body(&node.body, &mut func, &ctx, &label_blocks)?;
+        self.generate_body(&node.body, &mut func, &ctx, &cf)?;
 
         // Ensure function ends properly
         func.instruction(&Instruction::End);
@@ -171,25 +171,50 @@ impl CodeGenerator {
         body: &[ast::Instruction],
         func: &mut Function,
         ctx: &FunctionContext,
-        label_blocks: &HashMap<String, LabelInfo>,
+        cf: &ControlFlowAnalysis,
     ) -> Result<()> {
-        for instruction in body {
+        // Track which loops need to be closed
+        let mut open_loops: Vec<String> = Vec::new();
+
+        for (pos, instruction) in body.iter().enumerate() {
             match instruction {
                 ast::Instruction::Label(id) => {
                     // Labels in BMB are targets for jumps
                     // In Wasm, we use block/loop structure
-                    if let Some(info) = label_blocks.get(&id.name) {
+                    if let Some(info) = cf.labels.get(&id.name) {
                         if info.is_loop_target {
                             // Start of a loop
                             func.instruction(&Instruction::Loop(BlockType::Empty));
+                            open_loops.push(id.name.clone());
                         }
                     }
                 }
                 ast::Instruction::Statement(stmt) => {
-                    self.generate_statement(stmt, func, ctx, label_blocks)?;
+                    self.generate_statement(stmt, func, ctx, cf, pos)?;
+
+                    // Check if any loops end at this position
+                    // Close loops in reverse order (innermost first)
+                    let loops_to_close: Vec<String> = cf.labels.iter()
+                        .filter(|(_, info)| info.loop_end_position == Some(pos))
+                        .map(|(name, _)| name.clone())
+                        .collect();
+
+                    for loop_name in loops_to_close {
+                        if let Some(idx) = open_loops.iter().rposition(|l| l == &loop_name) {
+                            // Close this loop
+                            func.instruction(&Instruction::End);
+                            open_loops.remove(idx);
+                        }
+                    }
                 }
             }
         }
+
+        // Close any remaining open loops (shouldn't happen in well-formed code)
+        for _ in open_loops.iter() {
+            func.instruction(&Instruction::End);
+        }
+
         Ok(())
     }
 
@@ -198,7 +223,8 @@ impl CodeGenerator {
         stmt: &Statement,
         func: &mut Function,
         ctx: &FunctionContext,
-        label_blocks: &HashMap<String, LabelInfo>,
+        cf: &ControlFlowAnalysis,
+        current_pos: usize,
     ) -> Result<()> {
         match stmt.opcode {
             Opcode::Add => self.generate_binary_op(stmt, func, ctx, BinaryOp::Add)?,
@@ -241,14 +267,10 @@ impl CodeGenerator {
             Opcode::Jmp => {
                 // Unconditional jump to label
                 if let Operand::Label(label_id) = &stmt.operands[0] {
-                    if let Some(info) = label_blocks.get(&label_id.name) {
-                        if info.is_loop_target {
-                            // Branch back to loop start
-                            func.instruction(&Instruction::Br(info.depth));
-                        } else {
-                            // Forward branch - use br
-                            func.instruction(&Instruction::Br(info.depth));
-                        }
+                    if let Some(_info) = cf.labels.get(&label_id.name) {
+                        // Calculate branch depth based on active loops at current position
+                        let depth = self.calculate_branch_depth(&label_id.name, current_pos, cf);
+                        func.instruction(&Instruction::Br(depth));
                     }
                 }
             }
@@ -259,9 +281,10 @@ impl CodeGenerator {
                 self.generate_operand(&stmt.operands[0], func, ctx)?;
 
                 if let Operand::Label(label_id) = &stmt.operands[1] {
-                    if let Some(info) = label_blocks.get(&label_id.name) {
-                        // Branch if non-zero
-                        func.instruction(&Instruction::BrIf(info.depth));
+                    if let Some(_info) = cf.labels.get(&label_id.name) {
+                        // Calculate branch depth based on active loops at current position
+                        let depth = self.calculate_branch_depth(&label_id.name, current_pos, cf);
+                        func.instruction(&Instruction::BrIf(depth));
                     }
                 }
             }
@@ -315,6 +338,43 @@ impl CodeGenerator {
         }
 
         Ok(())
+    }
+
+    /// Calculate the branch depth for a jump to a label
+    /// In WASM, br depth 0 means the innermost block/loop
+    fn calculate_branch_depth(
+        &self,
+        target_label: &str,
+        current_pos: usize,
+        cf: &ControlFlowAnalysis,
+    ) -> u32 {
+        // Get the list of active loops at the current position
+        let active_loops = cf.active_loops_at.get(current_pos)
+            .cloned()
+            .unwrap_or_default();
+
+        // If the target is in the active loops, find its position in the stack
+        // The depth is how many loops are nested inside it (from innermost)
+        if let Some(pos) = active_loops.iter().position(|l| l == target_label) {
+            // The target loop is at position `pos` in the stack
+            // Depth is counted from innermost (top of stack), so:
+            // depth = (total active loops) - (target position) - 1
+            (active_loops.len() - pos - 1) as u32
+        } else {
+            // Target is not in active loops - check if we're inside any loop
+            // and the target is this loop itself (just started)
+            if let Some(info) = cf.labels.get(target_label) {
+                if info.is_loop_target && info.position <= current_pos {
+                    // We're branching to a loop we're currently in
+                    // Find how deep we are
+                    0 // Default: innermost
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
+        }
     }
 
     fn generate_binary_op(
@@ -496,19 +556,29 @@ enum BinaryOp {
 
 /// Label information for control flow
 struct LabelInfo {
-    depth: u32,
+    /// Position of the label in the instruction list
+    position: usize,
+    /// Whether this label is a loop target (has backward jumps to it)
     is_loop_target: bool,
+    /// Position of the last backward jump to this label (where loop ends)
+    loop_end_position: Option<usize>,
+    /// Nesting depth (for calculating br depth)
+    depth: u32,
+}
+
+/// Analyzed control flow structure
+struct ControlFlowAnalysis {
+    labels: HashMap<String, LabelInfo>,
+    /// Active loop stack at each position (for depth calculation)
+    active_loops_at: Vec<Vec<String>>,
 }
 
 /// Analyze control flow to determine label block structure
-fn analyze_control_flow(body: &[ast::Instruction]) -> HashMap<String, LabelInfo> {
-    let mut labels = HashMap::new();
-
-    // Simple analysis: find labels and determine if they're loop targets
-    // A label is a loop target if there's a jmp to it from after the label
+fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
     let mut label_positions: HashMap<String, usize> = HashMap::new();
-    let mut jump_targets: Vec<(usize, String)> = Vec::new();
+    let mut jump_targets: Vec<(usize, String, bool)> = Vec::new(); // (pos, label, is_jmp_not_jif)
 
+    // First pass: collect labels and jumps
     for (pos, instr) in body.iter().enumerate() {
         match instr {
             ast::Instruction::Label(id) => {
@@ -517,25 +587,82 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> HashMap<String, LabelInfo>
             ast::Instruction::Statement(stmt) => {
                 if matches!(stmt.opcode, Opcode::Jmp | Opcode::Jif) {
                     if let Some(Operand::Label(label_id)) = stmt.operands.last() {
-                        jump_targets.push((pos, label_id.name.clone()));
+                        let is_jmp = matches!(stmt.opcode, Opcode::Jmp);
+                        jump_targets.push((pos, label_id.name.clone(), is_jmp));
                     }
                 }
             }
         }
     }
 
-    // Determine if each label is a loop target (backward jump)
+    // Second pass: determine loop targets and their boundaries
+    let mut labels: HashMap<String, LabelInfo> = HashMap::new();
+
     for (label_name, label_pos) in &label_positions {
-        let is_loop = jump_targets.iter()
-            .any(|(jump_pos, target)| target == label_name && *jump_pos > *label_pos);
+        // Find all backward jumps to this label
+        let backward_jumps: Vec<_> = jump_targets.iter()
+            .filter(|(jump_pos, target, _)| target == label_name && *jump_pos > *label_pos)
+            .collect();
+
+        let is_loop = !backward_jumps.is_empty();
+        let loop_end = backward_jumps.iter().map(|(pos, _, _)| *pos).max();
 
         labels.insert(label_name.clone(), LabelInfo {
-            depth: 0,  // Simplified: actual depth calculation needed for nested blocks
+            position: *label_pos,
             is_loop_target: is_loop,
+            loop_end_position: loop_end,
+            depth: 0, // Will be calculated in third pass
         });
     }
 
-    labels
+    // Third pass: calculate nesting depth at each position
+    // Track which loops are active at each instruction position
+    let mut active_loops_at: Vec<Vec<String>> = vec![Vec::new(); body.len()];
+    let mut current_loops: Vec<String> = Vec::new();
+
+    for (pos, instr) in body.iter().enumerate() {
+        // Check if any loops end at this position
+        let loops_ending: Vec<String> = labels.iter()
+            .filter(|(_, info)| info.loop_end_position == Some(pos))
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        // First, record active loops at this position (before any changes)
+        active_loops_at[pos] = current_loops.clone();
+
+        // Handle loop starts
+        if let ast::Instruction::Label(id) = instr {
+            if let Some(info) = labels.get(&id.name) {
+                if info.is_loop_target {
+                    current_loops.push(id.name.clone());
+                }
+            }
+        }
+
+        // Handle loop ends (remove from stack after the ending instruction)
+        for ended in loops_ending {
+            if let Some(idx) = current_loops.iter().position(|l| l == &ended) {
+                current_loops.remove(idx);
+            }
+        }
+    }
+
+    // Fourth pass: set depth for each label based on nesting
+    for (_label_name, info) in labels.iter_mut() {
+        if info.is_loop_target {
+            // Depth when inside the loop is the number of enclosing loops
+            // For br inside a loop, depth 0 = the innermost loop
+            if let Some(active) = active_loops_at.get(info.position) {
+                // Count loops that are active when this loop starts
+                info.depth = active.len() as u32;
+            }
+        }
+    }
+
+    ControlFlowAnalysis {
+        labels,
+        active_loops_at,
+    }
 }
 
 fn type_to_valtype(ty: &Type) -> ValType {
@@ -747,7 +874,9 @@ mod tests {
             }),
         ];
 
-        let labels = analyze_control_flow(&body);
-        assert!(labels.get("_loop").map(|l| l.is_loop_target).unwrap_or(false));
+        let cf = analyze_control_flow(&body);
+        assert!(cf.labels.get("_loop").map(|l| l.is_loop_target).unwrap_or(false));
+        // Loop should end at position 1 (the jmp instruction)
+        assert_eq!(cf.labels.get("_loop").map(|l| l.loop_end_position), Some(Some(1)));
     }
 }
