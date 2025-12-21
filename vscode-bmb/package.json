@@ -1,0 +1,102 @@
+{
+  "name": "bmb-lang",
+  "displayName": "BMB Language Support",
+  "description": "Language support for BMB (Bare-Metal-Banter) - A contract-first programming language",
+  "version": "0.2.0",
+  "publisher": "aill-project",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openlith/lang-bmb"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "bmb",
+    "bare-metal-banter",
+    "contracts",
+    "webassembly",
+    "wasm"
+  ],
+  "activationEvents": [
+    "onLanguage:bmb"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "bmb",
+        "aliases": [
+          "BMB",
+          "Bare-Metal-Banter"
+        ],
+        "extensions": [
+          ".bmb"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "bmb",
+        "scopeName": "source.bmb",
+        "path": "./syntaxes/bmb.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "BMB",
+      "properties": {
+        "bmb.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the bmb-lsp executable. If empty, will use 'bmb-lsp' from PATH."
+        },
+        "bmb.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "bmb.formatDocument",
+        "title": "Format BMB Document"
+      },
+      {
+        "command": "bmb.restartServer",
+        "title": "Restart BMB Language Server"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

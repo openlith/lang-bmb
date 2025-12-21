@@ -175,6 +175,103 @@ fn lint_node(node: &Node, warnings: &mut Vec<LintWarning>) {
             }
         }
     }
+
+    // Check for unreachable code (code after unconditional jmp or ret)
+    check_unreachable_code(node, warnings);
+
+    // Check for unused labels
+    check_unused_labels(node, warnings);
+
+    // Check invariants
+    for inv in &node.invariants {
+        if is_trivial_contract(&inv.condition) {
+            warnings.push(LintWarning {
+                severity: Severity::Info,
+                code: "I003",
+                message: format!("invariant for label '{}' is trivially true", inv.label.name),
+                line: Some(inv.span.line),
+                suggestion: Some("consider specifying a meaningful invariant condition".to_string()),
+            });
+        }
+    }
+}
+
+fn check_unreachable_code(node: &Node, warnings: &mut Vec<LintWarning>) {
+    // Warn about unreachable code *between* control flow and next label
+    let mut prev_was_terminator = false;
+    for instr in node.body.iter() {
+        match instr {
+            Instruction::Label(_) => {
+                prev_was_terminator = false;
+            }
+            Instruction::Statement(stmt) => {
+                if prev_was_terminator {
+                    warnings.push(LintWarning {
+                        severity: Severity::Warning,
+                        code: "W004",
+                        message: "unreachable code".to_string(),
+                        line: Some(stmt.span.line),
+                        suggestion: Some(
+                            "this code will never be executed; consider removing it".to_string(),
+                        ),
+                    });
+                    break; // Only warn once per function
+                }
+                prev_was_terminator = stmt.opcode == Opcode::Ret || stmt.opcode == Opcode::Jmp;
+            }
+        }
+    }
+}
+
+fn check_unused_labels(node: &Node, warnings: &mut Vec<LintWarning>) {
+    let mut defined_labels: HashSet<String> = HashSet::new();
+    let mut used_labels: HashSet<String> = HashSet::new();
+
+    for instr in &node.body {
+        match instr {
+            Instruction::Label(name) => {
+                defined_labels.insert(name.name.clone());
+            }
+            Instruction::Statement(stmt) => {
+                // Check operands for label references
+                for operand in &stmt.operands {
+                    if let Operand::Label(label) = operand {
+                        used_labels.insert(label.name.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Check invariants for used labels
+    for inv in &node.invariants {
+        used_labels.insert(inv.label.name.clone());
+    }
+
+    // Report unused labels
+    for label in defined_labels.difference(&used_labels) {
+        // Find the label's line number
+        let line = node
+            .body
+            .iter()
+            .find_map(|instr| {
+                if let Instruction::Label(name) = instr {
+                    if name.name == *label {
+                        return Some(name.span.line);
+                    }
+                }
+                None
+            })
+            .unwrap_or(node.span.line);
+
+        warnings.push(LintWarning {
+            severity: Severity::Style,
+            code: "S003",
+            message: format!("label '{}' is never used", label),
+            line: Some(line),
+            suggestion: Some("consider removing the unused label".to_string()),
+        });
+    }
 }
 
 fn is_trivial_contract(expr: &Expr) -> bool {
@@ -217,6 +314,9 @@ fn collect_vars_in_expr(expr: &Expr, vars: &mut HashSet<String>) {
         }
         Expr::Unary { operand, .. } => {
             collect_vars_in_expr(operand, vars);
+        }
+        Expr::Old(inner) => {
+            collect_vars_in_expr(inner, vars);
         }
         _ => {}
     }
@@ -398,5 +498,89 @@ mod tests {
         assert!(is_snake_case("_unused"));
         assert!(!is_snake_case("getValue"));
         assert!(!is_snake_case("GetValue"));
+    }
+
+    #[test]
+    fn test_lint_unreachable_code() {
+        let source = r#"
+@node test
+@params a:i32
+@returns i32
+@pre true
+
+  ret a
+  add %r a a
+  ret %r
+"#;
+
+        let ast = parser::parse(source).unwrap();
+        let warnings = lint(&ast);
+
+        assert!(warnings.iter().any(|w| w.code == "W004"));
+    }
+
+    #[test]
+    fn test_lint_reachable_after_label() {
+        let source = r#"
+@node test
+@params a:i32
+@returns i32
+@pre true
+
+  jmp _end
+_end:
+  ret a
+"#;
+
+        let ast = parser::parse(source).unwrap();
+        let warnings = lint(&ast);
+
+        // Should NOT have W004 warning - code after label is reachable
+        assert!(!warnings.iter().any(|w| w.code == "W004"));
+    }
+
+    #[test]
+    fn test_lint_unused_label() {
+        let source = r#"
+@node test
+@params
+@returns i32
+@pre true
+
+  mov %r 42
+  ret %r
+_unused:
+  ret %r
+"#;
+
+        let ast = parser::parse(source).unwrap();
+        let warnings = lint(&ast);
+
+        assert!(warnings
+            .iter()
+            .any(|w| w.code == "S003" && w.message.contains("unused")));
+    }
+
+    #[test]
+    fn test_lint_used_label() {
+        let source = r#"
+@node test
+@params
+@returns i32
+@pre true
+
+  jmp _end
+_end:
+  mov %r 42
+  ret %r
+"#;
+
+        let ast = parser::parse(source).unwrap();
+        let warnings = lint(&ast);
+
+        // Should NOT have S003 for _end since it's used
+        assert!(!warnings
+            .iter()
+            .any(|w| w.code == "S003" && w.message.contains("end")));
     }
 }
