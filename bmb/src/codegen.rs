@@ -9,13 +9,88 @@ use std::collections::HashMap;
 
 use wasm_encoder::{
     BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection,
-    Instruction, Module, TypeSection, ValType,
+    Instruction, MemArg, MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 
 use crate::ast::{self, Node, Opcode, Operand, Statement, Type};
 use crate::contracts::{ContractCodeGenerator, VerifiedProgram};
-use crate::types::TypedNode;
+use crate::types::{TypedNode, TypeRegistry};
 use crate::{BmbError, Result};
+
+/// Memory layout information for a struct
+#[derive(Debug, Clone)]
+pub struct StructLayout {
+    /// Total size in bytes
+    pub size: u32,
+    /// Alignment in bytes
+    pub alignment: u32,
+    /// Field offsets by name
+    pub fields: HashMap<String, FieldLayout>,
+}
+
+/// Layout for a single field
+#[derive(Debug, Clone)]
+pub struct FieldLayout {
+    pub offset: u32,
+    pub size: u32,
+    pub ty: Type,
+}
+
+impl StructLayout {
+    /// Calculate layout for a struct given its fields
+    pub fn calculate(fields: &[(String, Type)]) -> Self {
+        let mut offset = 0u32;
+        let mut max_align = 1u32;
+        let mut field_layouts = HashMap::new();
+
+        for (name, ty) in fields {
+            let (size, align) = type_size_align(ty);
+            max_align = max_align.max(align);
+
+            // Align offset
+            offset = (offset + align - 1) & !(align - 1);
+
+            field_layouts.insert(
+                name.clone(),
+                FieldLayout {
+                    offset,
+                    size,
+                    ty: ty.clone(),
+                },
+            );
+
+            offset += size;
+        }
+
+        // Align total size to struct alignment
+        let size = (offset + max_align - 1) & !(max_align - 1);
+
+        StructLayout {
+            size,
+            alignment: max_align,
+            fields: field_layouts,
+        }
+    }
+}
+
+/// Get size and alignment for a type
+fn type_size_align(ty: &Type) -> (u32, u32) {
+    match ty {
+        Type::I32 | Type::Bool => (4, 4),
+        Type::I64 => (8, 8),
+        Type::F32 => (4, 4),
+        Type::F64 => (8, 8),
+        Type::Void => (0, 1),
+        Type::Array { element, size } => {
+            let (elem_size, elem_align) = type_size_align(element);
+            (elem_size * (*size as u32), elem_align)
+        }
+        // Pointers are 32-bit in WASM32
+        Type::Ref(_) => (4, 4),
+        // Struct and Enum are handled via layout calculation
+        Type::Struct(_) | Type::Enum(_) => (4, 4), // Placeholder - actual size from registry
+    }
+}
 
 /// Generate WebAssembly binary from a verified program
 ///
@@ -37,11 +112,15 @@ struct CodeGenerator {
     types: TypeSection,
     imports: ImportSection,
     functions: FunctionSection,
+    memory: MemorySection,
     exports: ExportSection,
     code: CodeSection,
     function_indices: HashMap<String, u32>,
+    struct_layouts: HashMap<String, StructLayout>,
     next_func_idx: u32,
     next_type_idx: u32,
+    /// Flag to track if memory is needed
+    needs_memory: bool,
 }
 
 impl CodeGenerator {
@@ -51,15 +130,40 @@ impl CodeGenerator {
             types: TypeSection::new(),
             imports: ImportSection::new(),
             functions: FunctionSection::new(),
+            memory: MemorySection::new(),
             exports: ExportSection::new(),
             code: CodeSection::new(),
             function_indices: HashMap::new(),
+            struct_layouts: HashMap::new(),
             next_func_idx: 0,
             next_type_idx: 0,
+            needs_memory: false,
         }
     }
 
+    /// Calculate and store layouts for all structs
+    fn calculate_struct_layouts(&mut self, registry: &TypeRegistry) {
+        for (name, struct_def) in &registry.structs {
+            let fields: Vec<(String, Type)> = struct_def
+                .fields
+                .iter()
+                .map(|f| (f.name.name.clone(), f.ty.clone()))
+                .collect();
+            let layout = StructLayout::calculate(&fields);
+            self.struct_layouts.insert(name.clone(), layout);
+            self.needs_memory = true;
+        }
+    }
+
+    /// Get layout for a struct by name
+    fn get_struct_layout(&self, name: &str) -> Option<&StructLayout> {
+        self.struct_layouts.get(name)
+    }
+
     fn generate_program(&mut self, program: &crate::types::TypedProgram) -> Result<()> {
+        // Phase 0: Calculate struct layouts from registry
+        self.calculate_struct_layouts(&program.registry);
+
         // First pass: register imported functions
         // Imported functions take function indices before local functions
         for import in &program.imports {
@@ -694,6 +798,22 @@ impl CodeGenerator {
             self.module.section(&self.imports);
         }
         self.module.section(&self.functions);
+
+        // Memory section (if needed for structs/arrays)
+        if self.needs_memory {
+            // One page of memory (64KB) - can grow as needed
+            self.memory.memory(MemoryType {
+                minimum: 1,
+                maximum: Some(256), // Max 16MB
+                memory64: false,
+                shared: false,
+                page_size_log2: None,
+            });
+            self.module.section(&self.memory);
+            // Export memory for host access
+            self.exports.export("memory", ExportKind::Memory, 0);
+        }
+
         self.module.section(&self.exports);
         self.module.section(&self.code);
         self.module.finish()
@@ -1126,5 +1246,77 @@ mod tests {
             cf.labels.get("_loop").map(|l| l.loop_end_position),
             Some(Some(1))
         );
+    }
+
+    #[test]
+    fn test_struct_layout_simple() {
+        // Struct with two i32 fields
+        let fields = vec![
+            ("x".to_string(), Type::I32),
+            ("y".to_string(), Type::I32),
+        ];
+        let layout = StructLayout::calculate(&fields);
+
+        assert_eq!(layout.size, 8); // 4 + 4 = 8 bytes
+        assert_eq!(layout.alignment, 4);
+        assert_eq!(layout.fields.get("x").map(|f| f.offset), Some(0));
+        assert_eq!(layout.fields.get("y").map(|f| f.offset), Some(4));
+    }
+
+    #[test]
+    fn test_struct_layout_mixed_types() {
+        // Struct with mixed types: i32, i64, i32
+        // Should align i64 on 8-byte boundary
+        let fields = vec![
+            ("a".to_string(), Type::I32), // 0..4
+            ("b".to_string(), Type::I64), // 8..16 (aligned to 8)
+            ("c".to_string(), Type::I32), // 16..20
+        ];
+        let layout = StructLayout::calculate(&fields);
+
+        assert_eq!(layout.alignment, 8); // Alignment from i64
+        assert_eq!(layout.fields.get("a").map(|f| f.offset), Some(0));
+        assert_eq!(layout.fields.get("b").map(|f| f.offset), Some(8));
+        assert_eq!(layout.fields.get("c").map(|f| f.offset), Some(16));
+        assert_eq!(layout.size, 24); // Padded to 8-byte alignment
+    }
+
+    #[test]
+    fn test_struct_layout_with_array() {
+        // Struct with array field
+        let fields = vec![
+            ("count".to_string(), Type::I32),
+            (
+                "data".to_string(),
+                Type::Array {
+                    element: Box::new(Type::I32),
+                    size: 4,
+                },
+            ),
+        ];
+        let layout = StructLayout::calculate(&fields);
+
+        assert_eq!(layout.fields.get("count").map(|f| f.offset), Some(0));
+        assert_eq!(layout.fields.get("data").map(|f| f.offset), Some(4));
+        assert_eq!(layout.fields.get("data").map(|f| f.size), Some(16)); // 4 * 4 = 16
+        assert_eq!(layout.size, 20); // 4 + 16 = 20
+    }
+
+    #[test]
+    fn test_type_size_align() {
+        assert_eq!(type_size_align(&Type::I32), (4, 4));
+        assert_eq!(type_size_align(&Type::I64), (8, 8));
+        assert_eq!(type_size_align(&Type::F32), (4, 4));
+        assert_eq!(type_size_align(&Type::F64), (8, 8));
+        assert_eq!(type_size_align(&Type::Bool), (4, 4));
+        assert_eq!(type_size_align(&Type::Void), (0, 1));
+
+        let array_type = Type::Array {
+            element: Box::new(Type::I32),
+            size: 10,
+        };
+        assert_eq!(type_size_align(&array_type), (40, 4)); // 10 * 4 = 40 bytes
+
+        assert_eq!(type_size_align(&Type::Ref(Box::new(Type::I32))), (4, 4));
     }
 }
