@@ -1,0 +1,23 @@
+# Fibonacci function
+# Computes the nth Fibonacci number
+
+@node fibonacci
+@params n:i32
+@returns i32
+@pre n >= 0
+@post ret >= 0
+
+  lt %base1 n 1
+  jif %base1 _zero
+  eq %base2 n 1
+  jif %base2 _one
+  sub %n1 n 1
+  sub %n2 n 2
+  call %f1 fibonacci %n1
+  call %f2 fibonacci %n2
+  add %r %f1 %f2
+  ret %r
+_zero:
+  ret 0
+_one:
+  ret 1

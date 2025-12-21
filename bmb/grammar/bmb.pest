@@ -1,0 +1,97 @@
+// BMB (Bare-Metal-Banter) PEG Grammar
+// Version 0.1
+//
+// "Omission is guessing, and guessing is error."
+
+// Whitespace and comments
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
+
+// Program structure
+program = { SOI ~ node* ~ EOI }
+
+// Node (function) definition
+node = {
+    "@node" ~ ident ~
+    params ~
+    returns ~
+    contracts ~
+    body
+}
+
+// Parameters
+params = { "@params" ~ param* }
+param = { ident ~ ":" ~ type_name }
+
+// Return type
+returns = { "@returns" ~ type_name }
+
+// Contracts (can have multiple @pre and @post)
+contracts = { (pre | post)* }
+pre = { "@pre" ~ expr }
+post = { "@post" ~ expr }
+
+// Function body - explicitly mark start with indented instructions
+body = { (label | stmt)+ }
+
+// Labels use underscore prefix (e.g., _loop:, _end:)
+// Must include the colon to distinguish from label_ref in operands
+label = @{ "_" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ ~ ":" }
+
+// Statements - opcode followed by operands
+stmt = { opcode ~ operand* }
+
+// Opcodes - must be checked before ident in operand
+opcode = @{
+    ("add" | "sub" | "mul" | "div" | "mod" |
+     "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
+     "ret" | "jmp" | "jif" | "call" |
+     "mov" | "load" | "store") ~ !ASCII_ALPHANUMERIC
+}
+
+// Operands
+operand = { register | label_ref | float_literal | int_literal | ident }
+register = @{ "%" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
+// label_ref must NOT be followed by colon (that would be a label definition)
+label_ref = @{ "_" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ ~ !":" }
+
+// Types
+type_name = { "i32" | "i64" | "f32" | "f64" | "bool" }
+
+// Expressions (for contracts)
+expr = { or_expr }
+
+or_expr = { and_expr ~ ("||" ~ and_expr)* }
+and_expr = { comparison ~ ("&&" ~ comparison)* }
+comparison = { term ~ (comp_op ~ term)? }
+comp_op = { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+
+term = { factor ~ (term_op ~ factor)* }
+term_op = { "+" | "-" }
+
+factor = { unary ~ (factor_op ~ unary)* }
+factor_op = { "*" | "/" | "%" }
+
+unary = { unary_op? ~ primary }
+unary_op = { "!" | "-" }
+
+// 'ret' is a special keyword in contracts that refers to return value
+primary = { "(" ~ expr ~ ")" | float_literal | int_literal | bool_literal | ret_keyword | ident }
+ret_keyword = { "ret" ~ !ASCII_ALPHANUMERIC }
+
+// Literals
+float_literal = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+int_literal = @{ "-"? ~ ASCII_DIGIT+ }
+bool_literal = { "true" | "false" }
+
+// Reserved keywords (opcodes and boolean literals)
+reserved = @{
+    ("add" | "sub" | "mul" | "div" | "mod" |
+     "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
+     "ret" | "jmp" | "jif" | "call" |
+     "mov" | "load" | "store" |
+     "true" | "false") ~ !ASCII_ALPHANUMERIC
+}
+
+// Identifiers (must NOT start with underscore, and must NOT be a reserved keyword)
+ident = @{ !reserved ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }

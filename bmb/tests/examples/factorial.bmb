@@ -1,0 +1,17 @@
+# Factorial function
+# Computes n! for non-negative n
+
+@node factorial
+@params n:i32
+@returns i32
+@pre n >= 0
+@post ret >= 1
+
+  eq %base n 0
+  jif %base _one
+  sub %n1 n 1
+  call %r factorial %n1
+  mul %r n %r
+  ret %r
+_one:
+  ret 1

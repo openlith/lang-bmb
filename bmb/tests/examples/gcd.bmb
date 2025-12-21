@@ -1,0 +1,17 @@
+# Greatest Common Divisor (Euclidean algorithm)
+# Computes GCD of two positive integers
+
+@node gcd
+@params a:i32 b:i32
+@returns i32
+@pre a > 0
+@pre b >= 0
+@post ret > 0
+
+  eq %done b 0
+  jif %done _return_a
+  mod %rem a b
+  call %r gcd b %rem
+  ret %r
+_return_a:
+  ret a

@@ -1,6 +1,6 @@
-# BMB - Bare-Metal-Banter
+# BMB - Bare-Metal-Banter Specification
 
-**Version 0.1**
+**Version:** 0.1
 
 ---
 
@@ -12,163 +12,144 @@
 
 ### 1.2 Core Principles
 
-| Principle | Description | Decision Criterion |
-|-----------|-------------|-------------------|
-| **Omission is Guessing** | What is omitted must be guessed. Guessing leads to errors. | Allow omission vs Enforce explicit → Enforce |
-| **Explicit is Mandatory** | Explicitness is not preferred, it's grammatically enforced. | Optional vs Required → Required |
-| **Compile-time over Runtime** | Errors should be caught at compile-time, not runtime. | Runtime check vs Compile check → Compile |
-| **Contracts are Code** | Contracts are verified code, not comments. | Documentation vs Contract → Contract |
-| **Writer Diligence over Human Convenience** | Assumes tireless writer (AI), abandons human convenience. | Write less vs Write precisely → Precisely |
+| Principle | Technical Implication | Decision Criterion |
+| --- | --- | --- |
+| **Omission is Guessing** | Implicit behavior is prohibited. Every state change must be declared. | **Enforce Explicit** over Allow Omission |
+| **Explicit is Mandatory** | Clarity is a grammatical requirement, not a stylistic choice. | **Required** over Optional |
+| **Compile-time over Runtime** | Logic must be mathematically verifiable before execution. | **Static Verification** over Runtime Checks |
+| **Contracts are Code** | Formal specifications replace prose documentation. | **Executable Contract** over Text Doc |
+| **Writer Diligence** | Optimized for a tireless writer (AI) rather than human brevity. | **Precision** over Convenience |
 
 ### 1.3 Decision Framework
 
-When facing a choice during development:
+When evaluating language features or implementation details, the **BMB Framework** must be applied:
 
-```
-Q1: Does this feature allow omission?
-    → Yes → Make it impossible to omit
-
-Q2: Is it discovered at runtime or compile-time?
-    → Runtime → Move to compile-time
-
-Q3: Is it for human convenience or writer accuracy?
-    → Human convenience → Remove or redesign
-
-Q4: Is this information in separate documentation?
-    → Yes → Integrate into language spec (contracts)
-```
+1. **Does this feature allow omission?** * If yes, redesign to make it impossible to omit.
+2. **Is the error discovered at runtime or compile-time?** * If runtime, move the discovery to the compile/verification stage.
+3. **Is this for human convenience or writer accuracy?** * If human convenience (sugar), remove or redesign for accuracy.
+4. **Is this information in separate documentation?** * If yes, integrate it into the language spec as a verifiable contract.
 
 ### 1.4 Terminology
 
-| Term | Meaning |
-|------|---------|
-| **Writer** | The entity that writes BMB code (AI or human) |
-| **Tool** | Compiler, analyzer, and other BMB processing systems |
-
-BMB is designed assuming the writer is AI. Humans can write BMB, but human convenience is not considered.
+* **Writer**: The entity generating BMB code (primarily AI, but includes high-precision human developers).
+* **Tool**: The BMB ecosystem (Parser, Type Checker, SMT Solver, Codegen).
 
 ### 1.5 Code = Documentation
 
-**Traditional paradigm:**
-```
-Code + README + Comments + API docs + Diagrams
-  ↓
-Sync issues, stale docs, scattered information
-```
+BMB eliminates the "Sync Gap" between code and documentation by promoting specifications to first-class citizens.
 
-**BMB paradigm:**
-```
-Code = Documentation
-  ↓
-Contracts (@pre, @post) are both spec and docs
-Types are both description and constraint
-Derived info is generated on-demand by tools
-```
+* **Traditional:** `Code + README + Comments + API Docs = Inconsistency`
+* **BMB:** `Verified Code + Verifiable Contracts = Absolute Truth`
 
-**Principles:**
-- Comments → Promoted to contracts (must be verifiable)
-- Descriptions → Expressed as types/contracts (code is docs)
-- Meta info → Generated on-demand by tools (dependencies, complexity, call graphs, etc.)
+**The "Doc-to-Contract" Promotion:**
+
+* **Comments**  Promoted to `@pre` / `@post` contracts (must be verifiable).
+* **API Descriptions**  Expressed through rigorous Type Definitions.
+* **Meta Info**  Extracted on-demand by tools (e.g., dependency graphs, complexity analysis).
 
 ---
 
 ## 2. Goals
 
-### 2.1 Quantitative Goals
+### 2.1 Quantitative Benchmarks
 
-| Metric | Current (Traditional) | Target (BMB) |
-|--------|----------------------|--------------|
-| First-gen success rate | 60% | 90%+ |
-| Debug iterations | 3-5 | 0-1 |
-| Syntax errors | 5-15% | 0% |
-| Type errors | 10-20% | 0% |
+| Metric | Industry Standard (C/Asm) | BMB Target |
+| --- | --- | --- |
+| First-generation Success Rate | 60% | **90%+** |
+| Debug Iterations | 3 - 5 | **0 - 1** |
+| Syntax Error Frequency | 5 - 15% | **0%** |
+| Type/Logic Discrepancy | 10 - 20% | **0%** |
 
 ### 2.2 Scope of Responsibility
 
 | BMB Guarantees | BMB Does Not Guarantee |
-|----------------|------------------------|
-| Syntax correctness | Business logic correctness |
-| Type safety | Requirements alignment |
-| Stated contract verification | Unstated constraints |
-| Memory safety | Performance optimization |
+| --- | --- |
+| Syntactic integrity | High-level business logic alignment |
+| Strict type safety | Accuracy of external requirements |
+| Formally verified contracts | Unstated/Omitted constraints |
+| Deterministic memory safety | Performance at the cost of safety |
 
 ---
 
 ## 3. Syntax
 
-### 3.1 Structure
+### 3.1 Function Definition (`@node`)
+
+Every unit of execution must define its boundaries and expectations explicitly.
 
 ```bmb
 @node <function_name>
 @params <name>:<type> ...
 @returns <type>
-@pre <precondition>
-@post <postcondition>
+@pre <condition>
+@post <condition>
 
   <instructions>
   ret <value>
+
 ```
 
-### 3.2 Types
+### 3.2 Primitive Types
 
 | Type | Description |
-|------|-------------|
-| `i32`, `i64` | Signed integers |
-| `f32`, `f64` | Floating point |
-| `bool` | Boolean |
-| `[T; N]` | Fixed array (v0.2) |
-| `&T` | Reference (v0.2) |
+| --- | --- |
+| `i32`, `i64` | Signed integers (fixed width) |
+| `f32`, `f64` | IEEE 754 Floating point |
+| `bool` | Boolean (explicit `true`/`false`) |
+| `[T; N]` | Fixed-size array (v0.2) |
+| `&T` | Immutable reference (v0.2) |
 
-### 3.3 Instructions
+### 3.3 Instruction Set Architecture (ISA)
 
-**Arithmetic:** `add`, `sub`, `mul`, `div`, `mod`
-**Comparison:** `eq`, `lt`, `gt`, `le`, `ge`, `ne`
-**Control:** `ret`, `jmp`, `jif`, `call`
-**Variables:** `mov`, `load`, `store`
+* **Arithmetic:** `add`, `sub`, `mul`, `div`, `mod`
+* **Comparison:** `eq`, `lt`, `gt`, `le`, `ge`, `ne`
+* **Control Flow:** `ret`, `jmp`, `jif` (jump-if), `call`
+* **Memory/Registers:** `mov`, `load`, `store`
 
-### 3.4 Contracts
+### 3.4 Formal Contracts
+
+Contracts replace prose. A BMB file is effectively a mathematical proof.
 
 ```bmb
 @node divide
 @params a:f64 b:f64
 @returns f64
-@pre b != 0           # Precondition: b is not zero
-@post ret * b == a    # Postcondition: result verification
+@pre b != 0           # Documentation: "Input b cannot be zero"
+@post ret * b == a    # Documentation: "Returns the exact quotient"
 
   div %r a b
   ret %r
-```
 
-Contracts = Documentation:
-- `@pre b != 0` replaces "b must not be zero" documentation
-- `@post ret * b == a` replaces "guarantees correct division" documentation
-- No separate explanation needed (contracts are the spec)
+```
 
 ---
 
-## 4. Compilation
+## 4. Compilation & Verification
 
 ### 4.1 Pipeline
 
 ```
-.bmb → Parser → Type Checker → Contract Checker → Codegen → .wasm
+.bmb Source → Parser → Type Checker → SMT/Contract Verifier → Codegen → .wasm
+
 ```
 
-### 4.2 Verification Levels
+### 4.2 Verification Levels (Compliance)
 
-| Level | Name | Guarantee |
-|-------|------|-----------|
-| 0 | Stone | Parsing success |
-| 1 | Bronze | Type safety |
-| 2 | Silver | Contract verification |
+| Level | Name | Requirement |
+| --- | --- | --- |
+| 0 | **Stone** | Successful AST parsing |
+| 1 | **Bronze** | Static type safety and register allocation |
+| 2 | **Silver** | Mathematical verification of all `@pre` and `@post` conditions |
 
-### 4.3 Target
+### 4.3 Target Environment
 
-WebAssembly (WASI)
+**WebAssembly (WASI)**: Providing a sandboxed, deterministic execution environment for bare-metal logic.
 
 ---
 
 ## 5. Examples
+
+### Recursive Factorial with Constraints
 
 ```bmb
 @node factorial
@@ -177,23 +158,13 @@ WebAssembly (WASI)
 @pre n >= 0
 @post ret >= 1
 
-  eq %base n 0
-  jif %base _one
-  sub %n1 n 1
-  call %r factorial %n1
-  mul %r n %r
-  ret %r
-_one:
+  eq %is_zero n 0
+  jif %is_zero _handle_zero
+  sub %n_minus_one n 1
+  call %rec_result factorial %n_minus_one
+  mul %final_result n %rec_result
+  ret %final_result
+_handle_zero:
   ret 1
+
 ```
-
----
-
-## 6. Roadmap
-
-- [x] Philosophy definition
-- [x] Syntax design
-- [ ] Parser
-- [ ] Type checker
-- [ ] Contract checker
-- [ ] Wasm codegen

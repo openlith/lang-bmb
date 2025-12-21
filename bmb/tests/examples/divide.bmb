@@ -1,0 +1,11 @@
+# Safe division function
+# Demonstrates precondition: divisor cannot be zero
+
+@node divide
+@params a:f64 b:f64
+@returns f64
+@pre b != 0.0
+@post ret * b == a
+
+  div %r a b
+  ret %r

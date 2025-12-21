@@ -1,0 +1,39 @@
+[package]
+name = "bmb"
+version = "0.1.0"
+edition = "2021"
+description = "BMB (Bare-Metal-Banter) - A contract-first programming language for AI"
+license = "MIT"
+authors = ["AILL Project"]
+repository = "https://github.com/openlith/bmb"
+
+[dependencies]
+# Parser - PEG-based parsing
+pest = "2.7"
+pest_derive = "2.7"
+
+# WebAssembly generation
+wasm-encoder = "0.220"
+
+# Error handling
+thiserror = "2.0"
+
+# CLI (future)
+# clap = { version = "4.4", features = ["derive"] }
+
+[dev-dependencies]
+# Testing utilities
+wasmtime = "27"
+
+[lib]
+name = "bmb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bmbc"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = []
+cli = []

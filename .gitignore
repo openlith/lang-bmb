@@ -1,1 +1,6 @@
 local-docs/
+
+# Rust/Cargo
+/bmb/target/
+**/*.rs.bk
+Cargo.lock
