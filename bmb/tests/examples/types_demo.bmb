@@ -1,0 +1,17 @@
+# Test i64 type operations
+@node sum64
+@params a:i64 b:i64
+@returns i64
+@pre true
+@post ret == a + b
+  add %r a b
+  ret %r
+
+# Test f32 type operations
+@node product32
+@params x:f32 y:f32
+@returns f32
+@pre true
+@post true
+  mul %r x y
+  ret %r

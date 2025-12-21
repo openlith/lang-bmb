@@ -562,3 +562,168 @@ _inner_loop:
     let result = nested_loop.call(&mut store, (5, 5)).expect("call failed");
     assert_eq!(result, 25);
 }
+
+// ========== Advanced Type Tests (i64, f32, f64) ==========
+
+#[test]
+fn test_execute_i64_operations() {
+    let source = r#"
+# i64 addition with large values
+@node sum64
+@params a:i64 b:i64
+@returns i64
+@pre true
+@post ret == a + b
+
+  add %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let sum64 = instance
+        .get_typed_func::<(i64, i64), i64>(&mut store, "sum64")
+        .expect("sum64 function not found");
+
+    // Test: basic addition
+    let result = sum64.call(&mut store, (100, 200)).expect("call failed");
+    assert_eq!(result, 300);
+
+    // Test: large values beyond i32 range
+    let result = sum64
+        .call(&mut store, (5_000_000_000, 3_000_000_000))
+        .expect("call failed");
+    assert_eq!(result, 8_000_000_000);
+
+    // Test: negative values
+    let result = sum64
+        .call(&mut store, (-1_000_000_000_000, 500_000_000_000))
+        .expect("call failed");
+    assert_eq!(result, -500_000_000_000);
+}
+
+#[test]
+fn test_execute_f32_operations() {
+    let source = r#"
+# f32 multiplication
+@node product32
+@params x:f32 y:f32
+@returns f32
+@pre true
+@post true
+
+  mul %r x y
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let product32 = instance
+        .get_typed_func::<(f32, f32), f32>(&mut store, "product32")
+        .expect("product32 function not found");
+
+    // Test: basic multiplication
+    let result = product32.call(&mut store, (2.5, 4.0)).expect("call failed");
+    assert!((result - 10.0).abs() < 1e-5);
+
+    // Test: small values
+    let result = product32
+        .call(&mut store, (0.001, 1000.0))
+        .expect("call failed");
+    assert!((result - 1.0).abs() < 1e-5);
+
+    // Test: negative values
+    let result = product32
+        .call(&mut store, (-3.0, 5.0))
+        .expect("call failed");
+    assert!((result - (-15.0)).abs() < 1e-5);
+}
+
+#[test]
+fn test_execute_i64_with_contract() {
+    let source = r#"
+# i64 multiplication with postcondition
+# Note: Literal type inference doesn't yet promote literals to match operand types
+# So we use a postcondition that compares i64 values
+@node safe_mul64
+@params a:i64 b:i64
+@returns i64
+@pre true
+@post ret == a * b
+
+  mul %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let safe_mul64 = instance
+        .get_typed_func::<(i64, i64), i64>(&mut store, "safe_mul64")
+        .expect("safe_mul64 function not found");
+
+    // Test: valid multiplication
+    let result = safe_mul64
+        .call(&mut store, (1000, 2000))
+        .expect("call failed");
+    assert_eq!(result, 2_000_000);
+
+    // Test: large values
+    let result = safe_mul64
+        .call(&mut store, (1_000_000, 1_000_000))
+        .expect("call failed");
+    assert_eq!(result, 1_000_000_000_000);
+}
+
+#[test]
+fn test_execute_f32_division() {
+    let source = r#"
+# f32 division
+# Note: Literal type inference doesn't yet promote 0.0 (f64) to f32
+@node divide32
+@params a:f32 b:f32
+@returns f32
+@pre true
+@post true
+
+  div %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let divide32 = instance
+        .get_typed_func::<(f32, f32), f32>(&mut store, "divide32")
+        .expect("divide32 function not found");
+
+    // Test: valid division
+    let result = divide32
+        .call(&mut store, (10.0, 4.0))
+        .expect("call failed");
+    assert!((result - 2.5).abs() < 1e-5);
+
+    // Test: negative result
+    let result = divide32
+        .call(&mut store, (-15.0, 3.0))
+        .expect("call failed");
+    assert!((result - (-5.0)).abs() < 1e-5);
+}
