@@ -39,6 +39,11 @@ pub enum ErrorCode {
     E300, // Unknown local variable
     E301, // Unsupported operation
     E302, // Invalid control flow
+
+    // Module errors (E400-E499)
+    E400, // Module not found
+    E401, // Circular dependency
+    E402, // Module load error
 }
 
 impl ErrorCode {
@@ -70,6 +75,10 @@ impl ErrorCode {
             ErrorCode::E300 => "E300",
             ErrorCode::E301 => "E301",
             ErrorCode::E302 => "E302",
+            // Module errors
+            ErrorCode::E400 => "E400",
+            ErrorCode::E401 => "E401",
+            ErrorCode::E402 => "E402",
         }
     }
 
@@ -94,6 +103,7 @@ impl ErrorCode {
                 "contract error"
             }
             ErrorCode::E300 | ErrorCode::E301 | ErrorCode::E302 => "codegen error",
+            ErrorCode::E400 | ErrorCode::E401 | ErrorCode::E402 => "module error",
         }
     }
 }

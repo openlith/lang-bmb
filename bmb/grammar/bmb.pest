@@ -7,8 +7,17 @@
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
-// Program structure - now includes struct and enum definitions
-program = { SOI ~ import* ~ (struct_def | enum_def | node)* ~ EOI }
+// Program structure - now includes module uses, struct and enum definitions
+program = { SOI ~ (import | use_module)* ~ (struct_def | enum_def | node)* ~ EOI }
+
+// Module import (brings in another BMB module)
+// @use "path/to/module.bmb" as alias
+// @use math
+use_module = {
+    "@use" ~ (module_path | ident) ~ ("as" ~ ident)?
+}
+module_path = ${ "\"" ~ module_path_inner ~ "\"" }
+module_path_inner = @{ (!("\"") ~ ANY)+ }
 
 // Struct definition
 // @struct Point
@@ -80,7 +89,11 @@ opcode = @{
 }
 
 // Operands
-operand = { register | label_ref | str_literal | float_literal | int_literal | field_access | array_access | ident }
+// qualified_ident must come before ident to match module.function patterns
+operand = { register | label_ref | str_literal | float_literal | int_literal | field_access | array_access | qualified_ident | ident }
+
+// Qualified identifier for module references: module.function
+qualified_ident = { ident ~ "::" ~ ident }
 register = @{ "%" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
 // label_ref must NOT be followed by colon (that would be a label definition)
 label_ref = @{ "_" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ ~ !":" }

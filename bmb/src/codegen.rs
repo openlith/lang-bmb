@@ -461,9 +461,13 @@ impl CodeGenerator {
 
             Opcode::Call => {
                 // call result_reg function_name args...
-                // First operand is result register, second is function name
+                // First operand is result register, second is function name or qualified ident
                 let func_name = match &stmt.operands[1] {
-                    Operand::Identifier(id) => &id.name,
+                    Operand::Identifier(id) => id.name.clone(),
+                    Operand::QualifiedIdent { module, name } => {
+                        // Qualified identifier: module::function
+                        format!("{}::{}", module.name, name.name)
+                    }
                     _ => {
                         return Err(BmbError::CodegenError {
                             message: "Call requires function name".to_string(),
@@ -477,7 +481,7 @@ impl CodeGenerator {
                 }
 
                 // Call function
-                if let Some(&func_idx) = ctx.function_indices.get(func_name) {
+                if let Some(&func_idx) = ctx.function_indices.get(&func_name) {
                     func.instruction(&Instruction::Call(func_idx));
                 } else {
                     return Err(BmbError::CodegenError {
@@ -783,6 +787,16 @@ impl CodeGenerator {
                     message: format!(
                         "Array access {}[...] requires memory support (Phase A.1)",
                         base.name
+                    ),
+                });
+            }
+            Operand::QualifiedIdent { module, name } => {
+                // Qualified identifier: module::function
+                // Only valid in call position, not as a value operand
+                return Err(BmbError::CodegenError {
+                    message: format!(
+                        "Qualified identifier {}::{} can only be used in call position",
+                        module.name, name.name
                     ),
                 });
             }

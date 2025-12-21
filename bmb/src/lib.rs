@@ -21,6 +21,7 @@ pub mod error;
 pub mod fmt;
 pub mod grammar;
 pub mod lint;
+pub mod modules;
 pub mod optimize;
 pub mod parser;
 #[cfg(feature = "smt")]
@@ -31,6 +32,7 @@ pub mod x64;
 use thiserror::Error;
 
 pub use error::{Diagnostic, ErrorCode};
+pub use modules::{MergedProgram, ModuleResolver, ResolvedModule};
 
 /// BMB compilation error types
 #[derive(Error, Debug)]
@@ -50,6 +52,9 @@ pub enum BmbError {
 
     #[error("Codegen error: {message}")]
     CodegenError { message: String },
+
+    #[error("Module error: {message}")]
+    ModuleError { message: String },
 
     /// Enhanced diagnostic error with full context
     #[error("{0}")]
@@ -71,6 +76,7 @@ impl BmbError {
                 Diagnostic::new(ErrorCode::E200, message.clone())
             }
             BmbError::CodegenError { message } => Diagnostic::new(ErrorCode::E300, message.clone()),
+            BmbError::ModuleError { message } => Diagnostic::new(ErrorCode::E400, message.clone()),
             BmbError::Diagnosed(diag) => diag.clone(),
         }
     }

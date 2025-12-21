@@ -221,6 +221,59 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
     })
 }
 
+/// Perform type checking on a merged program with modules
+///
+/// This registers all module functions with qualified names before
+/// typechecking the main program.
+pub fn typecheck_merged(merged: &crate::modules::MergedProgram) -> Result<TypedProgram> {
+    let mut typed_nodes = Vec::new();
+    let mut global_env = TypeEnv::new();
+    let mut registry = TypeRegistry::new();
+
+    // Phase 0: Build type registry from struct and enum definitions
+    for struct_def in &merged.main.structs {
+        registry.add_struct(struct_def.clone());
+    }
+    for enum_def in &merged.main.enums {
+        registry.add_enum(enum_def.clone());
+    }
+
+    // Phase 1: Register module functions with qualified names
+    for (module_name, resolved) in &merged.modules {
+        for node in &resolved.program.nodes {
+            let qualified_name = format!("{}::{}", module_name, node.name.name);
+            let sig = FunctionSig {
+                params: node.params.iter().map(|p| p.ty.clone()).collect(),
+                returns: node.returns.clone(),
+            };
+            global_env.add_function(&qualified_name, sig);
+        }
+    }
+
+    // Phase 2: Register main program functions
+    for node in &merged.main.nodes {
+        let sig = FunctionSig {
+            params: node.params.iter().map(|p| p.ty.clone()).collect(),
+            returns: node.returns.clone(),
+        };
+        global_env.add_function(&node.name.name, sig);
+    }
+
+    // Phase 3: Type check main program nodes
+    for node in &merged.main.nodes {
+        let typed_node = typecheck_node(node, &global_env, &registry)?;
+        typed_nodes.push(typed_node);
+    }
+
+    Ok(TypedProgram {
+        imports: merged.main.imports.clone(),
+        structs: merged.main.structs.clone(),
+        enums: merged.main.enums.clone(),
+        nodes: typed_nodes,
+        registry,
+    })
+}
+
 /// Validate that a type is well-formed (all referenced types exist)
 fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
     match ty {
@@ -431,18 +484,28 @@ fn typecheck_statement(
                 });
             }
 
-            // Get function name
-            if let Operand::Identifier(ref func) = stmt.operands[1] {
-                if let Some(sig) = env.get_function(&func.name) {
-                    // Set result register type
-                    if let Operand::Register(ref r) = stmt.operands[0] {
-                        env.add_register(&r.name, sig.returns.clone());
-                    }
-                } else {
+            // Get function name (simple or qualified)
+            let func_name = match &stmt.operands[1] {
+                Operand::Identifier(func) => func.name.clone(),
+                Operand::QualifiedIdent { module, name } => {
+                    format!("{}::{}", module.name, name.name)
+                }
+                _ => {
                     return Err(BmbError::TypeError {
-                        message: format!("Unknown function: {}", func.name),
+                        message: "call requires function name".to_string(),
                     });
                 }
+            };
+
+            if let Some(sig) = env.get_function(&func_name) {
+                // Set result register type
+                if let Operand::Register(ref r) = stmt.operands[0] {
+                    env.add_register(&r.name, sig.returns.clone());
+                }
+            } else {
+                return Err(BmbError::TypeError {
+                    message: format!("Unknown function: {}", func_name),
+                });
             }
         }
 
@@ -573,6 +636,22 @@ fn get_operand_type(operand: &Operand, env: &TypeEnv, registry: &TypeRegistry) -
                 _ => Err(BmbError::TypeError {
                     message: format!("Cannot index non-array type: {}", base_type),
                 }),
+            }
+        }
+        Operand::QualifiedIdent { module, name } => {
+            // Qualified identifier: module::function
+            // Look up the qualified function name in the environment
+            let qualified_name = format!("{}::{}", module.name, name.name);
+            if let Some(sig) = env.get_function(&qualified_name) {
+                // Return the function's return type
+                Ok(sig.returns.clone())
+            } else {
+                Err(BmbError::TypeError {
+                    message: format!(
+                        "Unknown function in module: {}::{}",
+                        module.name, name.name
+                    ),
+                })
             }
         }
     }

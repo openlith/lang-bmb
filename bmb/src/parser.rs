@@ -35,6 +35,7 @@ pub fn parse(source: &str) -> Result<Program> {
     })?;
 
     let mut imports = Vec::new();
+    let mut uses = Vec::new();
     let mut structs = Vec::new();
     let mut enums = Vec::new();
     let mut nodes = Vec::new();
@@ -45,6 +46,9 @@ pub fn parse(source: &str) -> Result<Program> {
             match pair.as_rule() {
                 Rule::import => {
                     imports.push(parse_import(pair)?);
+                }
+                Rule::use_module => {
+                    uses.push(parse_use_module(pair)?);
                 }
                 Rule::struct_def => {
                     structs.push(parse_struct_def(pair)?);
@@ -63,6 +67,7 @@ pub fn parse(source: &str) -> Result<Program> {
 
     Ok(Program {
         imports,
+        uses,
         structs,
         enums,
         nodes,
@@ -90,6 +95,33 @@ fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import> {
         param_types,
         span,
     })
+}
+
+fn parse_use_module(pair: pest::iterators::Pair<Rule>) -> Result<ModuleUse> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let first = inner.next().unwrap();
+    let path = match first.as_rule() {
+        Rule::module_path => {
+            // Extract the path from the quoted string
+            let path_inner = first.into_inner().next().unwrap();
+            ModulePath::FilePath(path_inner.as_str().to_string())
+        }
+        Rule::ident => ModulePath::Name(parse_identifier(first)?),
+        _ => {
+            return Err(BmbError::ParseError {
+                line: span.line,
+                column: span.column,
+                message: format!("Unexpected module path: {:?}", first.as_rule()),
+            })
+        }
+    };
+
+    // Parse optional alias
+    let alias = inner.next().map(|p| parse_identifier(p)).transpose()?;
+
+    Ok(ModuleUse { path, alias, span })
 }
 
 fn parse_struct_def(pair: pest::iterators::Pair<Rule>) -> Result<StructDef> {
@@ -392,7 +424,7 @@ fn parse_opcode(pair: pest::iterators::Pair<Rule>) -> Result<Opcode> {
 fn parse_operand(pair: pest::iterators::Pair<Rule>) -> Result<Operand> {
     match pair.as_rule() {
         Rule::operand => {
-            // operand = { register | label_ref | float_literal | int_literal | field_access | array_access | ident }
+            // operand = { register | label_ref | float_literal | int_literal | field_access | array_access | qualified_ident | ident }
             // Drill into the inner pair
             parse_operand(pair.into_inner().next().unwrap())
         }
@@ -445,6 +477,13 @@ fn parse_operand(pair: pest::iterators::Pair<Rule>) -> Result<Operand> {
             let index_pair = inner.next().unwrap();
             let index = Box::new(parse_operand(index_pair)?);
             Ok(Operand::ArrayAccess { base, index })
+        }
+        Rule::qualified_ident => {
+            // qualified_ident = { ident ~ "::" ~ ident }
+            let mut inner = pair.into_inner();
+            let module = parse_identifier(inner.next().unwrap())?;
+            let name = parse_identifier(inner.next().unwrap())?;
+            Ok(Operand::QualifiedIdent { module, name })
         }
         Rule::ident => Ok(Operand::Identifier(parse_identifier(pair)?)),
         _ => Err(BmbError::ParseError {

@@ -96,6 +96,7 @@ fn format_operand(operand: &Operand) -> String {
         Operand::ArrayAccess { base, index } => {
             format!("{}[{}]", base.name, format_operand(index))
         }
+        Operand::QualifiedIdent { module, name } => format!("{}::{}", module.name, name.name),
     }
 }
 

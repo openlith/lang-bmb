@@ -7,10 +7,32 @@ use std::fmt;
 /// A complete BMB program consisting of imports, type definitions, and nodes
 #[derive(Debug, Clone)]
 pub struct Program {
+    /// External function imports (@import)
     pub imports: Vec<Import>,
+    /// Module imports (@use)
+    pub uses: Vec<ModuleUse>,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     pub nodes: Vec<Node>,
+}
+
+/// A module import: @use "path/to/module.bmb" as alias
+#[derive(Debug, Clone)]
+pub struct ModuleUse {
+    /// The module path (either a file path or module name)
+    pub path: ModulePath,
+    /// Optional alias for the module
+    pub alias: Option<Identifier>,
+    pub span: Span,
+}
+
+/// Module path variants
+#[derive(Debug, Clone)]
+pub enum ModulePath {
+    /// A file path: "path/to/module.bmb"
+    FilePath(String),
+    /// A module name: math
+    Name(Identifier),
 }
 
 /// A struct definition
@@ -256,6 +278,11 @@ pub enum Operand {
     StringLiteral(String),
     /// Identifier (variable or function name)
     Identifier(Identifier),
+    /// Qualified identifier: module::function
+    QualifiedIdent {
+        module: Identifier,
+        name: Identifier,
+    },
     /// Field access: obj.field
     FieldAccess {
         base: Identifier,
