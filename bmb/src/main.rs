@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use bmb::{
-    compile, compile_to_macho_with_opt, compile_to_pe_with_opt, compile_to_x64_with_opt,
-    compile_with_opt, VerificationLevel,
+    compile, compile_to_arm64_with_opt, compile_to_macho_with_opt, compile_to_pe_with_opt,
+    compile_to_x64_with_opt, compile_with_opt, VerificationLevel,
 };
 
 #[derive(Parser)]
@@ -37,7 +37,7 @@ enum Commands {
         #[arg(long, default_value = "silver")]
         level: String,
 
-        /// Output format: wasm, wat, ast, elf (Linux x64), pe (Windows x64), or macho (macOS x64)
+        /// Output format: wasm, wat, ast, elf (Linux x64), pe (Windows x64), macho (macOS x64), or arm64 (Linux ARM64)
         #[arg(long)]
         emit: Option<String>,
 
@@ -316,6 +316,43 @@ fn cmd_compile(
         }
     }
 
+    // Handle arm64/aarch64 output for Linux ARM64
+    if matches!(
+        emit.as_deref(),
+        Some("arm64") | Some("aarch64") | Some("arm")
+    ) {
+        match compile_to_arm64_with_opt(&source, opt_level) {
+            Ok((elf, level)) => {
+                let output_path = output.unwrap_or_else(|| {
+                    let mut p = file.clone();
+                    p.set_extension("arm64");
+                    p
+                });
+                if let Err(e) = fs::write(&output_path, &elf) {
+                    eprintln!(
+                        "{}: could not write '{}': {}",
+                        "error".red().bold(),
+                        output_path.display(),
+                        e
+                    );
+                    return ExitCode::FAILURE;
+                }
+                println!(
+                    "{} {} -> {} ({}, native ARM64 Linux)",
+                    "Compiled".green().bold(),
+                    file.display(),
+                    output_path.display(),
+                    level
+                );
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                print_error(&e, &source);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
     match compile_with_opt(&source, opt_level) {
         Ok((wasm, achieved_level)) => {
             match emit.as_deref() {
@@ -381,7 +418,7 @@ fn cmd_compile(
                 }
                 Some(other) => {
                     eprintln!(
-                        "{}: unknown emit format '{}'. Use: wasm, wat, ast, elf (Linux), pe (Windows), or macho (macOS)",
+                        "{}: unknown emit format '{}'. Use: wasm, wat, ast, elf (Linux x64), pe (Windows x64), macho (macOS x64), or arm64 (Linux ARM64)",
                         "error".red().bold(),
                         other
                     );

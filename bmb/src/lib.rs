@@ -14,6 +14,7 @@
 //! | 3     | Gold   | Static contract proof (SMT)   |
 
 pub mod ai;
+pub mod arm64;
 pub mod ast;
 pub mod codegen;
 pub mod contracts;
@@ -327,6 +328,50 @@ pub fn compile_to_macho_with_opt(
     Ok((macho, VerificationLevel::Silver))
 }
 
+/// Compile BMB source code to native ARM64 Linux ELF executable
+///
+/// This compiles BMB code directly to ARM64 machine code and wraps it in
+/// an ELF64 executable format. The resulting binary can run directly on
+/// Linux aarch64 systems (e.g., Raspberry Pi 4, AWS Graviton).
+///
+/// # Arguments
+///
+/// * `source` - The BMB source code to compile
+///
+/// # Returns
+///
+/// * The ARM64 ELF64 executable bytes and verification level achieved
+pub fn compile_to_arm64(source: &str) -> Result<(Vec<u8>, VerificationLevel)> {
+    compile_to_arm64_with_opt(source, optimize::OptLevel::Basic)
+}
+
+/// Compile BMB source code to ARM64 Linux ELF with specified optimization level
+pub fn compile_to_arm64_with_opt(
+    source: &str,
+    opt_level: optimize::OptLevel,
+) -> Result<(Vec<u8>, VerificationLevel)> {
+    // Phase 1: Parse
+    let ast = parser::parse(source)?;
+
+    // Phase 2: Type check
+    let typed_ast = types::typecheck(&ast)?;
+
+    // Phase 3: Verify contracts
+    let mut verified_ast = contracts::verify(&typed_ast)?;
+
+    // Phase 4: Optimize
+    optimize::optimize(&mut verified_ast, opt_level);
+
+    // Phase 5: Generate ARM64 machine code
+    let mut codegen = arm64::Arm64Codegen::new();
+    let code = codegen.compile_executable(&verified_ast.program)?;
+
+    // Phase 6: Wrap in ELF64 format
+    let elf = arm64::Arm64Elf64Builder::new().code(code).build();
+
+    Ok((elf, VerificationLevel::Silver))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +413,31 @@ mod tests {
         // Check CPU type at offset 4 (x86_64 = 0x01000007)
         let cputype = i32::from_le_bytes([macho[4], macho[5], macho[6], macho[7]]);
         assert_eq!(cputype, 0x0100_0007, "Not x86_64 CPU type");
+
+        assert_eq!(level, VerificationLevel::Silver);
+    }
+
+    #[test]
+    fn test_compile_to_arm64() {
+        let source = r#"
+@node main
+@params
+@returns i32
+  mov %result 42
+  ret %result
+"#;
+        let (elf, level) = compile_to_arm64(source).expect("ARM64 ELF compilation failed");
+
+        // Check ELF magic
+        assert!(elf.len() >= 20, "ELF file too small");
+        assert_eq!(&elf[0..4], &[0x7F, b'E', b'L', b'F'], "Not an ELF file");
+
+        // Check 64-bit class
+        assert_eq!(elf[4], 2, "Not 64-bit ELF");
+
+        // Check ARM64 machine type at offset 18
+        let machine = u16::from_le_bytes([elf[18], elf[19]]);
+        assert_eq!(machine, 183, "Not ARM64 (aarch64) machine type");
 
         assert_eq!(level, VerificationLevel::Silver);
     }
