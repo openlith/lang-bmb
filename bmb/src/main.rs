@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use bmb::{compile, VerificationLevel};
+use bmb::{compile, compile_with_opt, VerificationLevel};
 
 #[derive(Parser)]
 #[command(name = "bmbc")]
@@ -41,6 +41,10 @@ enum Commands {
         /// Output file path
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// Optimization level: none, basic, or aggressive
+        #[arg(long, default_value = "basic")]
+        opt: String,
     },
 
     /// Type-check a BMB source file without generating code
@@ -105,7 +109,8 @@ fn main() -> ExitCode {
             level,
             emit,
             output,
-        } => cmd_compile(file, level, emit, output),
+            opt,
+        } => cmd_compile(file, level, emit, output, opt),
         Commands::Check { file, level } => cmd_check(file, level),
         Commands::Run { file, func, args } => cmd_run(file, func, args),
         Commands::Fmt { file, write, check } => cmd_fmt(file, write, check),
@@ -125,11 +130,21 @@ fn parse_level(level: &str) -> Option<VerificationLevel> {
     }
 }
 
+fn parse_opt_level(opt: &str) -> Option<bmb::optimize::OptLevel> {
+    match opt.to_lowercase().as_str() {
+        "none" | "0" => Some(bmb::optimize::OptLevel::None),
+        "basic" | "1" => Some(bmb::optimize::OptLevel::Basic),
+        "aggressive" | "2" => Some(bmb::optimize::OptLevel::Aggressive),
+        _ => None,
+    }
+}
+
 fn cmd_compile(
     file: PathBuf,
     level: String,
     emit: Option<String>,
     output: Option<PathBuf>,
+    opt: String,
 ) -> ExitCode {
     // Validate the requested level (for future use)
     let _requested_level = match parse_level(&level) {
@@ -139,6 +154,18 @@ fn cmd_compile(
                 "{}: invalid verification level '{}'. Use: stone, bronze, or silver",
                 "error".red().bold(),
                 level
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let opt_level = match parse_opt_level(&opt) {
+        Some(l) => l,
+        None => {
+            eprintln!(
+                "{}: invalid optimization level '{}'. Use: none, basic, or aggressive",
+                "error".red().bold(),
+                opt
             );
             return ExitCode::FAILURE;
         }
@@ -157,7 +184,7 @@ fn cmd_compile(
         }
     };
 
-    match compile(&source) {
+    match compile_with_opt(&source, opt_level) {
         Ok((wasm, achieved_level)) => {
             match emit.as_deref() {
                 Some("wat") => {

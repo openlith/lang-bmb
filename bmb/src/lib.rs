@@ -19,6 +19,7 @@ pub mod contracts;
 pub mod error;
 pub mod fmt;
 pub mod lint;
+pub mod optimize;
 pub mod parser;
 pub mod types;
 
@@ -115,6 +116,23 @@ impl std::fmt::Display for VerificationLevel {
 ///
 /// A tuple of (wasm_binary, verification_level)
 pub fn compile(source: &str) -> Result<(Vec<u8>, VerificationLevel)> {
+    compile_with_opt(source, optimize::OptLevel::Basic)
+}
+
+/// Compile BMB source code to WebAssembly with specified optimization level
+///
+/// # Arguments
+///
+/// * `source` - The BMB source code to compile
+/// * `opt_level` - The optimization level to apply
+///
+/// # Returns
+///
+/// A tuple of (wasm_binary, verification_level)
+pub fn compile_with_opt(
+    source: &str,
+    opt_level: optimize::OptLevel,
+) -> Result<(Vec<u8>, VerificationLevel)> {
     // Phase 1: Parse
     let ast = parser::parse(source)?;
 
@@ -124,8 +142,12 @@ pub fn compile(source: &str) -> Result<(Vec<u8>, VerificationLevel)> {
     // Phase 3: Contract check
     let verified_ast = contracts::verify(&typed_ast)?;
 
-    // Phase 4: Generate Wasm
-    let wasm = codegen::generate(&verified_ast)?;
+    // Phase 4: Optimize
+    let mut optimized_ast = verified_ast;
+    optimize::optimize(&mut optimized_ast, opt_level);
+
+    // Phase 5: Generate Wasm
+    let wasm = codegen::generate(&optimized_ast)?;
 
     Ok((wasm, VerificationLevel::Silver))
 }
