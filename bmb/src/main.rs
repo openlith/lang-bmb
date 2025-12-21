@@ -117,29 +117,45 @@ fn cmd_compile(file: PathBuf, level: String, emit: Option<String>, output: Optio
 
     match compile(&source) {
         Ok((wasm, achieved_level)) => {
-            let output_path = output.unwrap_or_else(|| {
-                file.with_extension("wasm")
-            });
-
             match emit.as_deref() {
                 Some("wat") => {
-                    // For WAT output, we would need wasmprinter or similar
-                    eprintln!("{}: WAT output not yet implemented",
-                        "error".red().bold());
-                    return ExitCode::FAILURE;
+                    // Convert WASM binary to WAT text format
+                    match wasmprinter::print_bytes(&wasm) {
+                        Ok(wat) => {
+                            let output_path = output.unwrap_or_else(|| file.with_extension("wat"));
+                            if let Err(e) = fs::write(&output_path, &wat) {
+                                eprintln!("{}: could not write '{}': {}",
+                                    "error".red().bold(), output_path.display(), e);
+                                return ExitCode::FAILURE;
+                            }
+                            println!("{} {} -> {} ({})",
+                                "Compiled".green().bold(),
+                                file.display(),
+                                output_path.display(),
+                                achieved_level);
+                        }
+                        Err(e) => {
+                            eprintln!("{}: failed to convert to WAT: {}",
+                                "error".red().bold(), e);
+                            return ExitCode::FAILURE;
+                        }
+                    }
                 }
                 Some("ast") => {
-                    // For AST output, we would need to serialize the AST
-                    eprintln!("{}: AST output not yet implemented",
-                        "error".red().bold());
-                    return ExitCode::FAILURE;
+                    // Print AST in debug format
+                    // Re-parse to get the AST (compile already consumed it)
+                    match bmb::parser::parse(&source) {
+                        Ok(ast) => {
+                            println!("{:#?}", ast);
+                        }
+                        Err(e) => {
+                            print_error(&e, &source);
+                            return ExitCode::FAILURE;
+                        }
+                    }
                 }
-                Some(other) => {
-                    eprintln!("{}: unknown emit format '{}'. Use: wasm, wat, or ast",
-                        "error".red().bold(), other);
-                    return ExitCode::FAILURE;
-                }
-                None => {
+                Some("wasm") | None => {
+                    let output_path = output.unwrap_or_else(|| file.with_extension("wasm"));
                     if let Err(e) = fs::write(&output_path, &wasm) {
                         eprintln!("{}: could not write '{}': {}",
                             "error".red().bold(), output_path.display(), e);
@@ -150,6 +166,11 @@ fn cmd_compile(file: PathBuf, level: String, emit: Option<String>, output: Optio
                         file.display(),
                         output_path.display(),
                         achieved_level);
+                }
+                Some(other) => {
+                    eprintln!("{}: unknown emit format '{}'. Use: wasm, wat, or ast",
+                        "error".red().bold(), other);
+                    return ExitCode::FAILURE;
                 }
             }
             ExitCode::SUCCESS
