@@ -1,5 +1,5 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.1
+// Version 0.3
 //
 // "Omission is guessing, and guessing is error."
 
@@ -7,8 +7,26 @@
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
-// Program structure
-program = { SOI ~ import* ~ node* ~ EOI }
+// Program structure - now includes struct and enum definitions
+program = { SOI ~ import* ~ (struct_def | enum_def | node)* ~ EOI }
+
+// Struct definition
+// @struct Point
+//   x:f64
+//   y:f64
+struct_def = {
+    "@struct" ~ ident ~ struct_field+
+}
+struct_field = { ident ~ ":" ~ type_spec }
+
+// Enum definition
+// @enum Result
+//   Ok:i32
+//   Err:i32
+enum_def = {
+    "@enum" ~ ident ~ enum_variant+
+}
+enum_variant = { ident ~ (":" ~ type_spec)? }
 
 // External function imports
 // Example: @import print_i32(i32)
@@ -60,17 +78,41 @@ opcode = @{
 }
 
 // Operands
-operand = { register | label_ref | str_literal | float_literal | int_literal | ident }
+operand = { register | label_ref | str_literal | float_literal | int_literal | field_access | array_access | ident }
 register = @{ "%" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
 // label_ref must NOT be followed by colon (that would be a label definition)
 label_ref = @{ "_" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ ~ !":" }
+
+// Field access: obj.field (for structs)
+field_access = { ident ~ "." ~ ident }
+
+// Array access: arr[index] where index can be register or int
+array_access = { ident ~ "[" ~ (register | int_literal | ident) ~ "]" }
+
 // String literal with escape sequences
 str_literal = ${ "\"" ~ str_inner ~ "\"" }
 str_inner = @{ str_char* }
 str_char = { !("\"" | "\\") ~ ANY | "\\" ~ ("\"" | "\\" | "n" | "r" | "t" | "0") }
 
 // Types
-type_name = { "i32" | "i64" | "f32" | "f64" | "bool" }
+// type_spec is the main type rule (supports arrays, references, user types)
+type_spec = { array_type | ref_type | primitive_type | user_type }
+
+// Primitive types
+primitive_type = { "i32" | "i64" | "f32" | "f64" | "bool" | "void" }
+
+// Array type: [T; N] where T is element type and N is size
+array_type = { "[" ~ type_spec ~ ";" ~ array_size ~ "]" }
+array_size = @{ ASCII_DIGIT+ }
+
+// Reference type: &T
+ref_type = { "&" ~ type_spec }
+
+// User-defined type (struct or enum name)
+user_type = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+
+// Legacy alias for backwards compatibility
+type_name = { type_spec }
 
 // Expressions (for contracts)
 expr = { or_expr }

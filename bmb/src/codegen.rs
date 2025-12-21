@@ -542,24 +542,28 @@ impl CodeGenerator {
                 Type::I64 => Instruction::I64Add,
                 Type::F32 => Instruction::F32Add,
                 Type::F64 => Instruction::F64Add,
+                _ => Instruction::I32Add, // Compound types use i32 pointer arithmetic
             },
             BinaryOp::Sub => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32Sub,
                 Type::I64 => Instruction::I64Sub,
                 Type::F32 => Instruction::F32Sub,
                 Type::F64 => Instruction::F64Sub,
+                _ => Instruction::I32Sub,
             },
             BinaryOp::Mul => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32Mul,
                 Type::I64 => Instruction::I64Mul,
                 Type::F32 => Instruction::F32Mul,
                 Type::F64 => Instruction::F64Mul,
+                _ => Instruction::I32Mul,
             },
             BinaryOp::Div => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32DivS,
                 Type::I64 => Instruction::I64DivS,
                 Type::F32 => Instruction::F32Div,
                 Type::F64 => Instruction::F64Div,
+                _ => Instruction::I32DivS,
             },
             BinaryOp::Mod => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32RemS,
@@ -571,6 +575,7 @@ impl CodeGenerator {
                         message: "Modulo not supported for floating point types".to_string(),
                     })
                 }
+                _ => Instruction::I32RemS,
             },
             // Comparisons return i32 (bool)
             BinaryOp::Eq => match dest_type {
@@ -578,36 +583,42 @@ impl CodeGenerator {
                 Type::I64 => Instruction::I64Eq,
                 Type::F32 => Instruction::F32Eq,
                 Type::F64 => Instruction::F64Eq,
+                _ => Instruction::I32Eq,
             },
             BinaryOp::Ne => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32Ne,
                 Type::I64 => Instruction::I64Ne,
                 Type::F32 => Instruction::F32Ne,
                 Type::F64 => Instruction::F64Ne,
+                _ => Instruction::I32Ne,
             },
             BinaryOp::Lt => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32LtS,
                 Type::I64 => Instruction::I64LtS,
                 Type::F32 => Instruction::F32Lt,
                 Type::F64 => Instruction::F64Lt,
+                _ => Instruction::I32LtS,
             },
             BinaryOp::Le => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32LeS,
                 Type::I64 => Instruction::I64LeS,
                 Type::F32 => Instruction::F32Le,
                 Type::F64 => Instruction::F64Le,
+                _ => Instruction::I32LeS,
             },
             BinaryOp::Gt => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32GtS,
                 Type::I64 => Instruction::I64GtS,
                 Type::F32 => Instruction::F32Gt,
                 Type::F64 => Instruction::F64Gt,
+                _ => Instruction::I32GtS,
             },
             BinaryOp::Ge => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32GeS,
                 Type::I64 => Instruction::I64GeS,
                 Type::F32 => Instruction::F32Ge,
                 Type::F64 => Instruction::F64Ge,
+                _ => Instruction::I32GeS,
             },
         };
 
@@ -652,6 +663,24 @@ impl CodeGenerator {
             Operand::StringLiteral(_) => {
                 // String literals are only used with print opcode
                 // which is not supported in WASM
+            }
+            Operand::FieldAccess { base, field } => {
+                // Field access requires memory support (future)
+                return Err(BmbError::CodegenError {
+                    message: format!(
+                        "Field access {}.{} requires memory support (Phase A.2)",
+                        base.name, field.name
+                    ),
+                });
+            }
+            Operand::ArrayAccess { base, index: _ } => {
+                // Array access requires memory support (future)
+                return Err(BmbError::CodegenError {
+                    message: format!(
+                        "Array access {}[...] requires memory support (Phase A.1)",
+                        base.name
+                    ),
+                });
             }
         }
 
@@ -871,6 +900,12 @@ fn type_to_valtype(ty: &Type) -> ValType {
         Type::I64 => ValType::I64,
         Type::F32 => ValType::F32,
         Type::F64 => ValType::F64,
+        // Compound types - map to i32 (pointer/index) for now
+        Type::Void => ValType::I32,
+        Type::Array { .. } => ValType::I32, // Array base pointer
+        Type::Struct(_) => ValType::I32,    // Struct base pointer
+        Type::Enum(_) => ValType::I32,      // Enum discriminant
+        Type::Ref(_) => ValType::I32,       // Reference pointer
     }
 }
 

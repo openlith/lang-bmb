@@ -380,6 +380,31 @@ fn get_operand_type(operand: &Operand, env: &TypeEnv) -> Result<Type> {
         Operand::StringLiteral(_) => Err(BmbError::TypeError {
             message: "String literal cannot be used as value (only with print)".to_string(),
         }),
+        Operand::FieldAccess { base, field } => {
+            // Get base type and look up field type
+            let base_type = env.get_type(&base.name).ok_or_else(|| BmbError::TypeError {
+                message: format!("Unknown variable: {}", base.name),
+            })?;
+            // For now, return a placeholder - full struct support needs type registry
+            Err(BmbError::TypeError {
+                message: format!(
+                    "Field access {}.{} requires struct type support (base: {:?})",
+                    base.name, field.name, base_type
+                ),
+            })
+        }
+        Operand::ArrayAccess { base, index: _ } => {
+            // Get base type and extract element type
+            let base_type = env.get_type(&base.name).ok_or_else(|| BmbError::TypeError {
+                message: format!("Unknown variable: {}", base.name),
+            })?;
+            match base_type {
+                Type::Array { element, .. } => Ok(*element.clone()),
+                _ => Err(BmbError::TypeError {
+                    message: format!("Cannot index non-array type: {:?}", base_type),
+                }),
+            }
+        }
     }
 }
 

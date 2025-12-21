@@ -249,24 +249,28 @@ impl<'a> ContractCodeGenerator<'a> {
                         Type::I64 => Instruction::I64Add,
                         Type::F32 => Instruction::F32Add,
                         Type::F64 => Instruction::F64Add,
+                        _ => Instruction::I32Add, // Compound types use i32 pointer arithmetic
                     },
                     BinaryOp::Sub => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32Sub,
                         Type::I64 => Instruction::I64Sub,
                         Type::F32 => Instruction::F32Sub,
                         Type::F64 => Instruction::F64Sub,
+                        _ => Instruction::I32Sub,
                     },
                     BinaryOp::Mul => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32Mul,
                         Type::I64 => Instruction::I64Mul,
                         Type::F32 => Instruction::F32Mul,
                         Type::F64 => Instruction::F64Mul,
+                        _ => Instruction::I32Mul,
                     },
                     BinaryOp::Div => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32DivS,
                         Type::I64 => Instruction::I64DivS,
                         Type::F32 => Instruction::F32Div,
                         Type::F64 => Instruction::F64Div,
+                        _ => Instruction::I32DivS,
                     },
                     BinaryOp::Mod => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32RemS,
@@ -278,36 +282,42 @@ impl<'a> ContractCodeGenerator<'a> {
                         Type::I64 => Instruction::I64Eq,
                         Type::F32 => Instruction::F32Eq,
                         Type::F64 => Instruction::F64Eq,
+                        _ => Instruction::I32Eq,
                     },
                     BinaryOp::Ne => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32Ne,
                         Type::I64 => Instruction::I64Ne,
                         Type::F32 => Instruction::F32Ne,
                         Type::F64 => Instruction::F64Ne,
+                        _ => Instruction::I32Ne,
                     },
                     BinaryOp::Lt => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32LtS,
                         Type::I64 => Instruction::I64LtS,
                         Type::F32 => Instruction::F32Lt,
                         Type::F64 => Instruction::F64Lt,
+                        _ => Instruction::I32LtS,
                     },
                     BinaryOp::Le => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32LeS,
                         Type::I64 => Instruction::I64LeS,
                         Type::F32 => Instruction::F32Le,
                         Type::F64 => Instruction::F64Le,
+                        _ => Instruction::I32LeS,
                     },
                     BinaryOp::Gt => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32GtS,
                         Type::I64 => Instruction::I64GtS,
                         Type::F32 => Instruction::F32Gt,
                         Type::F64 => Instruction::F64Gt,
+                        _ => Instruction::I32GtS,
                     },
                     BinaryOp::Ge => match operand_type {
                         Type::I32 | Type::Bool => Instruction::I32GeS,
                         Type::I64 => Instruction::I64GeS,
                         Type::F32 => Instruction::F32Ge,
                         Type::F64 => Instruction::F64Ge,
+                        _ => Instruction::I32GeS,
                     },
                     BinaryOp::And => Instruction::I32And,
                     BinaryOp::Or => Instruction::I32Or,
@@ -334,6 +344,10 @@ impl<'a> ContractCodeGenerator<'a> {
                             }
                             Type::F64 => {
                                 func.instruction(&Instruction::F64Neg);
+                            }
+                            // Compound types fallback to i32
+                            _ => {
+                                func.instruction(&Instruction::I32Const(0));
                             }
                         }
                     }
@@ -409,6 +423,9 @@ pub fn type_to_valtype(ty: &Type) -> ValType {
         Type::I64 => ValType::I64,
         Type::F32 => ValType::F32,
         Type::F64 => ValType::F64,
+        Type::Void => ValType::I32, // Void uses i32 as placeholder
+        // Compound types use i32 as pointer/reference
+        Type::Array { .. } | Type::Struct(_) | Type::Enum(_) | Type::Ref(_) => ValType::I32,
     }
 }
 

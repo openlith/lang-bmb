@@ -35,6 +35,8 @@ pub fn parse(source: &str) -> Result<Program> {
     })?;
 
     let mut imports = Vec::new();
+    let mut structs = Vec::new();
+    let mut enums = Vec::new();
     let mut nodes = Vec::new();
 
     // Get the program pair and iterate over its inner pairs
@@ -43,6 +45,12 @@ pub fn parse(source: &str) -> Result<Program> {
             match pair.as_rule() {
                 Rule::import => {
                     imports.push(parse_import(pair)?);
+                }
+                Rule::struct_def => {
+                    structs.push(parse_struct_def(pair)?);
+                }
+                Rule::enum_def => {
+                    enums.push(parse_enum_def(pair)?);
                 }
                 Rule::node => {
                     nodes.push(parse_node(pair)?);
@@ -53,7 +61,12 @@ pub fn parse(source: &str) -> Result<Program> {
         }
     }
 
-    Ok(Program { imports, nodes })
+    Ok(Program {
+        imports,
+        structs,
+        enums,
+        nodes,
+    })
 }
 
 fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import> {
@@ -75,6 +88,58 @@ fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import> {
     Ok(Import {
         name,
         param_types,
+        span,
+    })
+}
+
+fn parse_struct_def(pair: pest::iterators::Pair<Rule>) -> Result<StructDef> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name = parse_identifier(inner.next().unwrap())?;
+    let mut fields = Vec::new();
+
+    for field_pair in inner {
+        if field_pair.as_rule() == Rule::struct_field {
+            let field_span = pair_to_span(&field_pair);
+            let mut field_inner = field_pair.into_inner();
+            let field_name = parse_identifier(field_inner.next().unwrap())?;
+            let field_type = parse_type(field_inner.next().unwrap())?;
+            fields.push(StructField {
+                name: field_name,
+                ty: field_type,
+                span: field_span,
+            });
+        }
+    }
+
+    Ok(StructDef { name, fields, span })
+}
+
+fn parse_enum_def(pair: pest::iterators::Pair<Rule>) -> Result<EnumDef> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name = parse_identifier(inner.next().unwrap())?;
+    let mut variants = Vec::new();
+
+    for variant_pair in inner {
+        if variant_pair.as_rule() == Rule::enum_variant {
+            let variant_span = pair_to_span(&variant_pair);
+            let mut variant_inner = variant_pair.into_inner();
+            let variant_name = parse_identifier(variant_inner.next().unwrap())?;
+            let payload = variant_inner.next().map(|t| parse_type(t)).transpose()?;
+            variants.push(EnumVariant {
+                name: variant_name,
+                payload,
+                span: variant_span,
+            });
+        }
+    }
+
+    Ok(EnumDef {
+        name,
+        variants,
         span,
     })
 }
@@ -178,17 +243,65 @@ fn parse_params(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Parameter>> {
 }
 
 fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type> {
-    match pair.as_str() {
-        "i32" => Ok(Type::I32),
-        "i64" => Ok(Type::I64),
-        "f32" => Ok(Type::F32),
-        "f64" => Ok(Type::F64),
-        "bool" => Ok(Type::Bool),
-        other => Err(BmbError::ParseError {
-            line: 0,
-            column: 0,
-            message: format!("Unknown type: {}", other),
-        }),
+    match pair.as_rule() {
+        Rule::type_name | Rule::type_spec => {
+            // Drill into inner
+            parse_type(pair.into_inner().next().unwrap())
+        }
+        Rule::primitive_type => match pair.as_str() {
+            "i32" => Ok(Type::I32),
+            "i64" => Ok(Type::I64),
+            "f32" => Ok(Type::F32),
+            "f64" => Ok(Type::F64),
+            "bool" => Ok(Type::Bool),
+            "void" => Ok(Type::Void),
+            other => Err(BmbError::ParseError {
+                line: 0,
+                column: 0,
+                message: format!("Unknown primitive type: {}", other),
+            }),
+        },
+        Rule::array_type => {
+            // array_type = { "[" ~ type_spec ~ ";" ~ array_size ~ "]" }
+            let mut inner = pair.into_inner();
+            let element_type = parse_type(inner.next().unwrap())?;
+            let size_str = inner.next().unwrap().as_str();
+            let size: usize = size_str.parse().map_err(|_| BmbError::ParseError {
+                line: 0,
+                column: 0,
+                message: format!("Invalid array size: {}", size_str),
+            })?;
+            Ok(Type::Array {
+                element: Box::new(element_type),
+                size,
+            })
+        }
+        Rule::ref_type => {
+            // ref_type = { "&" ~ type_spec }
+            let inner_type = parse_type(pair.into_inner().next().unwrap())?;
+            Ok(Type::Ref(Box::new(inner_type)))
+        }
+        Rule::user_type => {
+            // User-defined type (struct or enum name)
+            // We'll resolve whether it's a struct or enum during type checking
+            Ok(Type::Struct(pair.as_str().to_string()))
+        }
+        _ => {
+            // Fallback for simple type names (backwards compatibility)
+            match pair.as_str() {
+                "i32" => Ok(Type::I32),
+                "i64" => Ok(Type::I64),
+                "f32" => Ok(Type::F32),
+                "f64" => Ok(Type::F64),
+                "bool" => Ok(Type::Bool),
+                "void" => Ok(Type::Void),
+                other => Err(BmbError::ParseError {
+                    line: 0,
+                    column: 0,
+                    message: format!("Unknown type: {}", other),
+                }),
+            }
+        }
     }
 }
 
@@ -262,7 +375,7 @@ fn parse_opcode(pair: pest::iterators::Pair<Rule>) -> Result<Opcode> {
 fn parse_operand(pair: pest::iterators::Pair<Rule>) -> Result<Operand> {
     match pair.as_rule() {
         Rule::operand => {
-            // operand = { register | label_ref | float_literal | int_literal | ident }
+            // operand = { register | label_ref | float_literal | int_literal | field_access | array_access | ident }
             // Drill into the inner pair
             parse_operand(pair.into_inner().next().unwrap())
         }
@@ -300,6 +413,21 @@ fn parse_operand(pair: pest::iterators::Pair<Rule>) -> Result<Operand> {
             let inner = &raw[1..raw.len() - 1];
             let parsed = parse_string_escapes(inner);
             Ok(Operand::StringLiteral(parsed))
+        }
+        Rule::field_access => {
+            // field_access = { ident ~ "." ~ ident }
+            let mut inner = pair.into_inner();
+            let base = parse_identifier(inner.next().unwrap())?;
+            let field = parse_identifier(inner.next().unwrap())?;
+            Ok(Operand::FieldAccess { base, field })
+        }
+        Rule::array_access => {
+            // array_access = { ident ~ "[" ~ (register | int_literal | ident) ~ "]" }
+            let mut inner = pair.into_inner();
+            let base = parse_identifier(inner.next().unwrap())?;
+            let index_pair = inner.next().unwrap();
+            let index = Box::new(parse_operand(index_pair)?);
+            Ok(Operand::ArrayAccess { base, index })
         }
         Rule::ident => Ok(Operand::Identifier(parse_identifier(pair)?)),
         _ => Err(BmbError::ParseError {
@@ -763,15 +891,104 @@ _one:
     }
 
     #[test]
-    fn test_parse_error_invalid_type() {
+    fn test_parse_user_defined_type() {
+        // User-defined types are now allowed at parsing level (Phase A).
+        // Type validation happens during type checking, not parsing.
         let source = r#"
 @node bad
-@params x:invalid_type
+@params x:MyStruct
 @returns i32
 
   ret x
 "#;
         let result = parse(source);
-        assert!(result.is_err(), "Expected parse error for invalid type");
+        assert!(result.is_ok(), "User-defined types should parse successfully");
+        let program = result.unwrap();
+        assert_eq!(
+            program.nodes[0].params[0].ty,
+            Type::Struct("MyStruct".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_array_type() {
+        let source = r#"
+@node test_arrays
+@params arr:[i32; 10]
+@returns i32
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Array types should parse successfully");
+        let program = result.unwrap();
+        match &program.nodes[0].params[0].ty {
+            Type::Array { element, size } => {
+                assert_eq!(**element, Type::I32);
+                assert_eq!(*size, 10);
+            }
+            _ => panic!("Expected array type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_ref_type() {
+        let source = r#"
+@node test_ref
+@params ptr:&i32
+@returns i32
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Reference types should parse successfully");
+        let program = result.unwrap();
+        match &program.nodes[0].params[0].ty {
+            Type::Ref(inner) => {
+                assert_eq!(**inner, Type::I32);
+            }
+            _ => panic!("Expected reference type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_def() {
+        let source = r#"
+@struct Point
+  x:i32
+  y:i32
+
+@node main
+@params
+@returns i32
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Struct definitions should parse successfully");
+        let program = result.unwrap();
+        assert_eq!(program.structs.len(), 1);
+        assert_eq!(program.structs[0].name.name, "Point");
+        assert_eq!(program.structs[0].fields.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_enum_def() {
+        let source = r#"
+@enum Color
+  Red
+  Green
+  Blue
+
+@node main
+@params
+@returns i32
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Enum definitions should parse successfully");
+        let program = result.unwrap();
+        assert_eq!(program.enums.len(), 1);
+        assert_eq!(program.enums[0].name.name, "Color");
+        assert_eq!(program.enums[0].variants.len(), 3);
     }
 }

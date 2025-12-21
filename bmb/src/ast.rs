@@ -4,11 +4,45 @@
 
 use std::fmt;
 
-/// A complete BMB program consisting of imports and nodes
+/// A complete BMB program consisting of imports, type definitions, and nodes
 #[derive(Debug, Clone)]
 pub struct Program {
     pub imports: Vec<Import>,
+    pub structs: Vec<StructDef>,
+    pub enums: Vec<EnumDef>,
     pub nodes: Vec<Node>,
+}
+
+/// A struct definition
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: Identifier,
+    pub fields: Vec<StructField>,
+    pub span: Span,
+}
+
+/// A field in a struct
+#[derive(Debug, Clone)]
+pub struct StructField {
+    pub name: Identifier,
+    pub ty: Type,
+    pub span: Span,
+}
+
+/// An enum definition
+#[derive(Debug, Clone)]
+pub struct EnumDef {
+    pub name: Identifier,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+}
+
+/// A variant in an enum
+#[derive(Debug, Clone)]
+pub struct EnumVariant {
+    pub name: Identifier,
+    pub payload: Option<Type>,
+    pub span: Span,
 }
 
 /// An external function import
@@ -42,11 +76,62 @@ pub struct Parameter {
 /// BMB types
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
+    // Primitive types
     I32,
     I64,
     F32,
     F64,
     Bool,
+    Void,
+
+    // Compound types
+    /// Fixed-size array: [T; N]
+    Array {
+        element: Box<Type>,
+        size: usize,
+    },
+    /// User-defined struct type
+    Struct(String),
+    /// User-defined enum type
+    Enum(String),
+    /// Reference type: &T
+    Ref(Box<Type>),
+}
+
+impl Type {
+    /// Returns true if this is a primitive type
+    pub fn is_primitive(&self) -> bool {
+        matches!(
+            self,
+            Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool | Type::Void
+        )
+    }
+
+    /// Returns true if this is a numeric type
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, Type::I32 | Type::I64 | Type::F32 | Type::F64)
+    }
+
+    /// Returns true if this is an integer type
+    pub fn is_integer(&self) -> bool {
+        matches!(self, Type::I32 | Type::I64)
+    }
+
+    /// Returns true if this is a float type
+    pub fn is_float(&self) -> bool {
+        matches!(self, Type::F32 | Type::F64)
+    }
+
+    /// Returns the size in bytes for primitive types
+    pub fn size_bytes(&self) -> Option<usize> {
+        match self {
+            Type::I32 | Type::F32 => Some(4),
+            Type::I64 | Type::F64 => Some(8),
+            Type::Bool => Some(1),
+            Type::Void => Some(0),
+            _ => None, // Compound types need context to determine size
+        }
+    }
 }
 
 impl fmt::Display for Type {
@@ -57,6 +142,11 @@ impl fmt::Display for Type {
             Type::F32 => write!(f, "f32"),
             Type::F64 => write!(f, "f64"),
             Type::Bool => write!(f, "bool"),
+            Type::Void => write!(f, "void"),
+            Type::Array { element, size } => write!(f, "[{}; {}]", element, size),
+            Type::Struct(name) => write!(f, "{}", name),
+            Type::Enum(name) => write!(f, "{}", name),
+            Type::Ref(inner) => write!(f, "&{}", inner),
         }
     }
 }
@@ -156,6 +246,27 @@ pub enum Operand {
     StringLiteral(String),
     /// Identifier (variable or function name)
     Identifier(Identifier),
+    /// Field access: obj.field
+    FieldAccess {
+        base: Identifier,
+        field: Identifier,
+    },
+    /// Array access: arr[index]
+    ArrayAccess {
+        base: Identifier,
+        index: Box<Operand>,
+    },
+}
+
+/// Index for array access
+#[derive(Debug, Clone)]
+pub enum ArrayIndex {
+    /// Constant index
+    Const(usize),
+    /// Register-based index
+    Register(Identifier),
+    /// Variable-based index
+    Var(Identifier),
 }
 
 /// An expression (used in contracts)

@@ -83,6 +83,10 @@ fn format_operand(operand: &Operand) -> String {
         Operand::FloatLiteral(v) => format!("{:.1}", v),
         Operand::StringLiteral(s) => format!("\"{}\"", escape_string(s)),
         Operand::Label(name) => format!("_{}", name.name),
+        Operand::FieldAccess { base, field } => format!("{}.{}", base.name, field.name),
+        Operand::ArrayAccess { base, index } => {
+            format!("{}[{}]", base.name, format_operand(index))
+        }
     }
 }
 
