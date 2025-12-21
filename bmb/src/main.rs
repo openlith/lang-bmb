@@ -68,6 +68,32 @@ enum Commands {
         #[arg(last = true)]
         args: Vec<String>,
     },
+
+    /// Format a BMB source file
+    Fmt {
+        /// Input BMB source file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Write formatted output back to the file
+        #[arg(long)]
+        write: bool,
+
+        /// Check if the file is formatted (exit with error if not)
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Lint a BMB source file for style and potential issues
+    Lint {
+        /// Input BMB source file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Treat warnings as errors
+        #[arg(long)]
+        deny_warnings: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -82,6 +108,11 @@ fn main() -> ExitCode {
         } => cmd_compile(file, level, emit, output),
         Commands::Check { file, level } => cmd_check(file, level),
         Commands::Run { file, func, args } => cmd_run(file, func, args),
+        Commands::Fmt { file, write, check } => cmd_fmt(file, write, check),
+        Commands::Lint {
+            file,
+            deny_warnings,
+        } => cmd_lint(file, deny_warnings),
     }
 }
 
@@ -428,5 +459,134 @@ fn cmd_run(file: PathBuf, func: Option<String>, args: Vec<String>) -> ExitCode {
             eprintln!("{}: runtime error: {}", "error".red().bold(), e);
             ExitCode::FAILURE
         }
+    }
+}
+
+fn cmd_fmt(file: PathBuf, write: bool, check: bool) -> ExitCode {
+    let source = match fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "{}: could not read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let ast = match bmb::parser::parse(&source) {
+        Ok(a) => a,
+        Err(e) => {
+            print_error(&e, &source);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let formatted = bmb::fmt::format_program(&ast);
+
+    if check {
+        if source.trim() != formatted.trim() {
+            eprintln!(
+                "{}: {} would be reformatted",
+                "error".red().bold(),
+                file.display()
+            );
+            return ExitCode::FAILURE;
+        }
+        println!(
+            "{} {} is correctly formatted",
+            "OK".green().bold(),
+            file.display()
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    if write {
+        if let Err(e) = fs::write(&file, &formatted) {
+            eprintln!(
+                "{}: could not write '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
+            return ExitCode::FAILURE;
+        }
+        println!("{} {}", "Formatted".green().bold(), file.display());
+    } else {
+        print!("{}", formatted);
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn cmd_lint(file: PathBuf, deny_warnings: bool) -> ExitCode {
+    let source = match fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "{}: could not read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let ast = match bmb::parser::parse(&source) {
+        Ok(a) => a,
+        Err(e) => {
+            print_error(&e, &source);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let warnings = bmb::lint::lint(&ast);
+
+    if warnings.is_empty() {
+        println!(
+            "{} {} - no issues found",
+            "OK".green().bold(),
+            file.display()
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    let mut has_warnings = false;
+    for warning in &warnings {
+        has_warnings = true;
+        let severity_str = match warning.severity {
+            bmb::lint::Severity::Warning => "warning".yellow().bold(),
+            bmb::lint::Severity::Style => "style".cyan().bold(),
+            bmb::lint::Severity::Info => "info".blue().bold(),
+        };
+
+        eprint!("{}", severity_str);
+        if let Some(line) = warning.line {
+            eprint!(" at {}:{}", file.display(), line);
+        }
+        eprintln!(": [{}] {}", warning.code, warning.message);
+        if let Some(ref suggestion) = warning.suggestion {
+            eprintln!("  {} {}", "help:".cyan(), suggestion);
+        }
+    }
+
+    println!(
+        "\n{} {} warnings found in {}",
+        if deny_warnings {
+            "error:".red().bold()
+        } else {
+            "summary:".yellow().bold()
+        },
+        warnings.len(),
+        file.display()
+    );
+
+    if deny_warnings && has_warnings {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
