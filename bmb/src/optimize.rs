@@ -44,11 +44,11 @@ fn optimize_typed_program(program: &mut TypedProgram, level: OptLevel) {
 
 /// Optimize a typed node
 fn optimize_typed_node(node: &mut crate::types::TypedNode, level: OptLevel) {
-    // Optimize contracts in the original node
-    if let Some(ref mut pre) = node.node.precondition {
+    // Optimize contracts in the original node (multiple allowed)
+    for pre in &mut node.node.preconditions {
         *pre = optimize_expr(pre.clone(), level);
     }
-    if let Some(ref mut post) = node.node.postcondition {
+    for post in &mut node.node.postconditions {
         *post = optimize_expr(post.clone(), level);
     }
 

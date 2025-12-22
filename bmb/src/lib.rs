@@ -28,13 +28,15 @@ pub mod optimize;
 pub mod parser;
 #[cfg(feature = "smt")]
 pub mod smt;
+#[cfg(feature = "cli")]
+pub mod testing;
 pub mod types;
 pub mod x64;
 
 use thiserror::Error;
 
 pub use error::{Diagnostic, ErrorCode};
-pub use modules::{MergedProgram, ModuleResolver, ResolvedModule};
+pub use modules::{MergedProgram, ModuleEntry, ModuleIndex, ModuleResolver, ResolvedModule};
 
 /// BMB compilation error types
 #[derive(Error, Debug)]

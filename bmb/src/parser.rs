@@ -34,6 +34,7 @@ pub fn parse(source: &str) -> Result<Program> {
         }
     })?;
 
+    let mut module = None;
     let mut imports = Vec::new();
     let mut uses = Vec::new();
     let mut structs = Vec::new();
@@ -44,6 +45,9 @@ pub fn parse(source: &str) -> Result<Program> {
     if let Some(program_pair) = pairs.next() {
         for pair in program_pair.into_inner() {
             match pair.as_rule() {
+                Rule::module_decl => {
+                    module = Some(parse_module_decl(pair)?);
+                }
                 Rule::import => {
                     imports.push(parse_import(pair)?);
                 }
@@ -66,12 +70,32 @@ pub fn parse(source: &str) -> Result<Program> {
     }
 
     Ok(Program {
+        module,
         imports,
         uses,
         structs,
         enums,
         nodes,
     })
+}
+
+/// Parse module declaration: @module math.arithmetic OR @. math.arithmetic
+fn parse_module_decl(pair: pest::iterators::Pair<Rule>) -> Result<ModuleDecl> {
+    let span = pair_to_span(&pair);
+    let mut path = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::module_name {
+            // module_name = { ident ~ ("." ~ ident)* }
+            // Parse the dot-separated path
+            let module_str = inner.as_str();
+            for part in module_str.split('.') {
+                path.push(Identifier::new(part, span));
+            }
+        }
+    }
+
+    Ok(ModuleDecl { path, span })
 }
 
 fn parse_import(pair: pest::iterators::Pair<Rule>) -> Result<Import> {
@@ -181,19 +205,38 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
     let mut inner = pair.into_inner();
 
     let name = parse_identifier(inner.next().unwrap())?;
-    let params = parse_params(inner.next().unwrap())?;
-    let returns_pair = inner.next().unwrap();
-    let returns = parse_type(returns_pair.into_inner().next().unwrap())?;
 
+    // Initialize all node fields
+    let mut tags = Vec::new();
+    let mut params = Vec::new();
+    let mut returns = Type::Void;
     let mut preconditions = Vec::new();
     let mut postconditions = Vec::new();
     let mut invariants = Vec::new();
+    let mut assertions = Vec::new();
+    let mut tests = Vec::new();
     let mut body = Vec::new();
 
     for item in inner {
         match item.as_rule() {
+            Rule::node_tags => {
+                // Parse tags: @tags [tag1, tag2, ...] OR @# [...]
+                for tag_item in item.into_inner() {
+                    if tag_item.as_rule() == Rule::tag_list {
+                        for tag in tag_item.into_inner() {
+                            tags.push(parse_identifier(tag)?);
+                        }
+                    }
+                }
+            }
+            Rule::params => {
+                params = parse_params(item)?;
+            }
+            Rule::returns => {
+                returns = parse_type(item.into_inner().next().unwrap())?;
+            }
             Rule::contracts => {
-                // Parse contracts block which can contain multiple @pre, @post, and @invariant
+                // Parse contracts: @pre, @post, @invariant, @assert (and compact forms)
                 for contract in item.into_inner() {
                     match contract.as_rule() {
                         Rule::pre => {
@@ -205,11 +248,9 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
                         Rule::invariant => {
                             let inv_span = pair_to_span(&contract);
                             let mut inv_inner = contract.into_inner();
-                            // Parse label reference (e.g., _loop)
                             let label_pair = inv_inner.next().unwrap();
-                            let label_name = label_pair.as_str()[1..].to_string(); // Remove '_' prefix
+                            let label_name = label_pair.as_str()[1..].to_string();
                             let label = Identifier::new(label_name, pair_to_span(&label_pair));
-                            // Parse condition expression
                             let condition = parse_expr(inv_inner.next().unwrap())?;
                             invariants.push(Invariant {
                                 label,
@@ -217,7 +258,23 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
                                 span: inv_span,
                             });
                         }
+                        Rule::assert_stmt => {
+                            let assert_span = pair_to_span(&contract);
+                            let condition = parse_expr(contract.into_inner().next().unwrap())?;
+                            assertions.push(Assert {
+                                condition,
+                                span: assert_span,
+                            });
+                        }
                         _ => {}
+                    }
+                }
+            }
+            Rule::tests => {
+                // Parse test cases: @test expect(...) OR @? expect(...)
+                for test_item in item.into_inner() {
+                    if test_item.as_rule() == Rule::test_case {
+                        tests.push(parse_test_case(test_item)?);
                     }
                 }
             }
@@ -228,51 +285,121 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
         }
     }
 
-    // For now, combine multiple preconditions with AND
-    // In the future, we could store them separately
-    let precondition = if preconditions.is_empty() {
-        None
-    } else if preconditions.len() == 1 {
-        Some(preconditions.remove(0))
-    } else {
-        // Combine with AND
-        let mut combined = preconditions.remove(0);
-        for pre in preconditions {
-            combined = Expr::Binary {
-                left: Box::new(combined),
-                op: BinaryOp::And,
-                right: Box::new(pre),
-            };
-        }
-        Some(combined)
-    };
-
-    let postcondition = if postconditions.is_empty() {
-        None
-    } else if postconditions.len() == 1 {
-        Some(postconditions.remove(0))
-    } else {
-        let mut combined = postconditions.remove(0);
-        for post in postconditions {
-            combined = Expr::Binary {
-                left: Box::new(combined),
-                op: BinaryOp::And,
-                right: Box::new(post),
-            };
-        }
-        Some(combined)
-    };
-
     Ok(Node {
         name,
+        tags,
         params,
         returns,
-        precondition,
-        postcondition,
+        preconditions,
+        postconditions,
         invariants,
+        assertions,
+        tests,
         body,
         span,
     })
+}
+
+/// Parse a test case: @test expect(factorial(5), 120)
+fn parse_test_case(pair: pest::iterators::Pair<Rule>) -> Result<TestCase> {
+    let span = pair_to_span(&pair);
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::test_expr {
+            let mut test_inner = inner.into_inner();
+            let function = parse_identifier(test_inner.next().unwrap())?;
+
+            let mut args = Vec::new();
+            if let Some(args_pair) = test_inner.next() {
+                if args_pair.as_rule() == Rule::test_args {
+                    for arg in args_pair.into_inner() {
+                        args.push(parse_test_arg(arg)?);
+                    }
+                }
+            }
+
+            return Ok(TestCase {
+                function,
+                args,
+                span,
+            });
+        }
+    }
+
+    Err(BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Invalid test case".to_string(),
+    })
+}
+
+/// Parse a test argument
+fn parse_test_arg(pair: pest::iterators::Pair<Rule>) -> Result<TestArg> {
+    match pair.as_rule() {
+        Rule::test_arg => {
+            // test_arg can be: float_literal | int_literal | bool_literal | ident("("test_args?")") | ident
+            // We need to check if there are multiple children (function call) or just one
+            let mut inner = pair.into_inner();
+            let first = inner.next().unwrap();
+
+            match first.as_rule() {
+                Rule::float_literal => {
+                    let value: f64 = first.as_str().parse().unwrap();
+                    Ok(TestArg::Float(value))
+                }
+                Rule::int_literal => {
+                    let value: i64 = first.as_str().parse().unwrap();
+                    Ok(TestArg::Int(value))
+                }
+                Rule::bool_literal => {
+                    let value = first.as_str() == "true";
+                    Ok(TestArg::Bool(value))
+                }
+                Rule::ident => {
+                    // Check if there's a test_args following (function call)
+                    if let Some(args_pair) = inner.next() {
+                        if args_pair.as_rule() == Rule::test_args {
+                            let func = parse_identifier(first)?;
+                            let mut args = Vec::new();
+                            for arg in args_pair.into_inner() {
+                                args.push(parse_test_arg(arg)?);
+                            }
+                            return Ok(TestArg::Call { func, args });
+                        }
+                    }
+                    // Just a variable reference
+                    Ok(TestArg::Var(parse_identifier(first)?))
+                }
+                _ => Err(BmbError::ParseError {
+                    line: 0,
+                    column: 0,
+                    message: format!("Invalid test argument rule: {:?}", first.as_rule()),
+                }),
+            }
+        }
+        Rule::int_literal => {
+            let value: i64 = pair.as_str().parse().unwrap();
+            Ok(TestArg::Int(value))
+        }
+        Rule::float_literal => {
+            let value: f64 = pair.as_str().parse().unwrap();
+            Ok(TestArg::Float(value))
+        }
+        Rule::bool_literal => {
+            let value = pair.as_str() == "true";
+            Ok(TestArg::Bool(value))
+        }
+        Rule::ident => {
+            Ok(TestArg::Var(parse_identifier(pair)?))
+        }
+        _ => {
+            Err(BmbError::ParseError {
+                line: 0,
+                column: 0,
+                message: format!("Invalid test argument: {:?}", pair.as_rule()),
+            })
+        }
+    }
 }
 
 fn parse_params(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Parameter>> {
@@ -878,8 +1005,8 @@ _one:
 
         let program = result.unwrap();
         let node = &program.nodes[0];
-        assert!(node.precondition.is_some());
-        assert!(node.postcondition.is_none());
+        assert!(!node.preconditions.is_empty());
+        assert!(node.postconditions.is_empty());
     }
 
     #[test]

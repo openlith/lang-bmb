@@ -1,0 +1,28 @@
+# Test example with @test directives
+
+@node sum
+@params a:i32 b:i32
+@returns i32
+@test expect(sum(2, 3), 5)
+@test expect(sum(0, 0), 0)
+@test expect(sum(-1, 1), 0)
+
+  add %r a b
+  ret %r
+
+@node factorial
+@params n:i32
+@returns i32
+@pre n >= 0
+@test expect(factorial(5), 120)
+@test expect(factorial(0), 1)
+@test expect(factorial(1), 1)
+
+  eq %base n 0
+  jif %base _one
+  sub %n1 n 1
+  call %rec factorial %n1
+  mul %result n %rec
+  ret %result
+_one:
+  ret 1

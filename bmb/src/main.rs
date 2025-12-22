@@ -123,6 +123,17 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Run tests defined with @test directives
+    Test {
+        /// Input BMB source file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Output test results as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -145,6 +156,7 @@ fn main() -> ExitCode {
         } => cmd_lint(file, deny_warnings),
         Commands::Grammar { format, output } => cmd_grammar(format, output),
         Commands::Validate { file, json } => cmd_validate(file, json),
+        Commands::Test { file, json } => cmd_test(file, json),
     }
 }
 
@@ -920,6 +932,122 @@ fn cmd_validate(file: PathBuf, json: bool) -> ExitCode {
     }
 
     if result.valid {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn cmd_test(file: PathBuf, json: bool) -> ExitCode {
+    let source = match fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "{}: could not read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let suite = match bmb::testing::run_tests(&source) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}: {}", "error".red().bold(), e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if suite.total == 0 {
+        println!(
+            "{} {} - no tests found",
+            "OK".yellow().bold(),
+            file.display()
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    if json {
+        let json_output = serde_json::json!({
+            "file": file.display().to_string(),
+            "total": suite.total,
+            "passed": suite.passed,
+            "failed": suite.failed,
+            "results": suite.results.iter().map(|r| {
+                serde_json::json!({
+                    "node": r.node_name,
+                    "test_index": r.test_index,
+                    "function": r.function,
+                    "passed": r.passed,
+                    "expected": r.expected.as_ref().map(|v| v.to_string()),
+                    "actual": r.actual.as_ref().map(|v| v.to_string()),
+                    "error": r.error
+                })
+            }).collect::<Vec<_>>()
+        });
+        println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+    } else {
+        println!(
+            "{} Running {} tests from {}",
+            "Testing".cyan().bold(),
+            suite.total,
+            file.display()
+        );
+        println!();
+
+        for result in &suite.results {
+            let status = if result.passed {
+                "✓".green()
+            } else {
+                "✗".red()
+            };
+
+            print!(
+                "{} {}::test_{} - {}",
+                status,
+                result.node_name.bold(),
+                result.test_index,
+                result.function
+            );
+
+            if !result.passed {
+                if let (Some(expected), Some(actual)) = (&result.expected, &result.actual) {
+                    println!(
+                        " {} expected: {}, got: {}",
+                        "→".dimmed(),
+                        expected.to_string().green(),
+                        actual.to_string().red()
+                    );
+                } else if let Some(err) = &result.error {
+                    println!(" {} {}", "→".dimmed(), err.red());
+                } else {
+                    println!();
+                }
+            } else {
+                println!();
+            }
+        }
+
+        println!();
+        if suite.all_passed() {
+            println!(
+                "{} {} tests passed",
+                "OK".green().bold(),
+                suite.passed
+            );
+        } else {
+            println!(
+                "{} {} passed, {} failed",
+                "FAIL".red().bold(),
+                suite.passed.to_string().green(),
+                suite.failed.to_string().red()
+            );
+        }
+    }
+
+    if suite.all_passed() {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE

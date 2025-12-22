@@ -44,14 +44,19 @@ pub fn verify(program: &TypedProgram) -> Result<VerifiedProgram> {
     for typed_node in &program.nodes {
         let node = &typed_node.node;
 
-        // Validate precondition syntax
-        if let Some(ref pre) = node.precondition {
+        // Validate precondition syntax (multiple allowed)
+        for pre in &node.preconditions {
             validate_contract_expr(pre, "precondition", &node.name.name)?;
         }
 
-        // Validate postcondition syntax
-        if let Some(ref post) = node.postcondition {
+        // Validate postcondition syntax (multiple allowed)
+        for post in &node.postconditions {
             validate_contract_expr(post, "postcondition", &node.name.name)?;
+        }
+
+        // Validate assertion syntax (multiple allowed)
+        for assertion in &node.assertions {
+            validate_contract_expr(&assertion.condition, "assertion", &node.name.name)?;
         }
     }
 
@@ -163,6 +168,35 @@ impl<'a> ContractCodeGenerator<'a> {
     /// ```
     pub fn generate_postcondition(&self, expr: &Expr, func: &mut Function) {
         // Evaluate the condition expression
+        self.generate_expr(expr, func);
+
+        // If condition is false (0), trap
+        func.instruction(&Instruction::I32Eqz);
+        func.instruction(&Instruction::If(BlockType::Empty));
+        func.instruction(&Instruction::Unreachable);
+        func.instruction(&Instruction::End);
+    }
+
+    /// Generate assertion check instructions
+    ///
+    /// Assertions are checked at function entry (after preconditions).
+    /// They verify invariants that must hold throughout the function.
+    ///
+    /// Pattern:
+    /// ```wasm
+    /// ;; @assert x > 0
+    /// ;; Evaluate condition
+    /// local.get $x
+    /// i32.const 0
+    /// i32.gt_s
+    /// ;; If false (condition violated), trap
+    /// i32.eqz
+    /// if
+    ///   unreachable  ;; trap: assertion failed
+    /// end
+    /// ```
+    pub fn generate_assertion(&self, expr: &Expr, func: &mut Function) {
+        // Evaluate the condition expression (should leave i32 on stack: 1=true, 0=false)
         self.generate_expr(expr, func);
 
         // If condition is false (0), trap
@@ -452,11 +486,14 @@ mod tests {
     fn make_simple_program() -> TypedProgram {
         let node = Node {
             name: Identifier::new("test", Span::default()),
+            tags: vec![],
             params: vec![],
             returns: AstType::I32,
-            precondition: None,
-            postcondition: None,
+            preconditions: vec![],
+            postconditions: vec![],
             invariants: vec![],
+            assertions: vec![],
+            tests: vec![],
             body: vec![],
             span: Span::default(),
         };
@@ -531,5 +568,71 @@ mod tests {
 
         // Test ret type
         assert_eq!(gen.infer_expr_type(&Expr::Ret), Type::F64);
+    }
+
+    #[test]
+    fn test_assertion_generator() {
+        let mut locals = HashMap::new();
+        locals.insert("x".to_string(), 0);
+
+        let mut types = HashMap::new();
+        types.insert("x".to_string(), Type::I32);
+
+        let gen = ContractCodeGenerator::new(&locals, &types, Type::I32);
+
+        // Test expression: x >= 0
+        let expr = Expr::Binary {
+            op: BinaryOp::Ge,
+            left: Box::new(Expr::Var(Identifier::new("x", Span::default()))),
+            right: Box::new(Expr::IntLit(0)),
+        };
+
+        let mut func = Function::new([]);
+        gen.generate_assertion(&expr, &mut func);
+        func.instruction(&WasmInstruction::End);
+
+        // Verify it doesn't panic - actual behavior tested in integration
+    }
+
+    #[test]
+    fn test_verify_with_assertions() {
+        let node = Node {
+            name: Identifier::new("test", Span::default()),
+            tags: vec![],
+            params: vec![crate::ast::Parameter {
+                name: Identifier::new("x", Span::default()),
+                ty: AstType::I32,
+                span: Span::default(),
+            }],
+            returns: AstType::I32,
+            preconditions: vec![],
+            postconditions: vec![],
+            invariants: vec![],
+            assertions: vec![crate::ast::Assert {
+                condition: Expr::Binary {
+                    op: BinaryOp::Ge,
+                    left: Box::new(Expr::Var(Identifier::new("x", Span::default()))),
+                    right: Box::new(Expr::IntLit(0)),
+                },
+                span: Span::default(),
+            }],
+            tests: vec![],
+            body: vec![],
+            span: Span::default(),
+        };
+
+        let program = TypedProgram {
+            imports: vec![],
+            structs: vec![],
+            enums: vec![],
+            nodes: vec![TypedNode {
+                node,
+                register_types: HashMap::new(),
+            }],
+            registry: crate::types::TypeRegistry::new(),
+        };
+
+        let result = verify(&program);
+        assert!(result.is_ok());
     }
 }

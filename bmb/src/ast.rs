@@ -7,6 +7,8 @@ use std::fmt;
 /// A complete BMB program consisting of imports, type definitions, and nodes
 #[derive(Debug, Clone)]
 pub struct Program {
+    /// Module declaration (@module / @.) - Index system
+    pub module: Option<ModuleDecl>,
     /// External function imports (@import)
     pub imports: Vec<Import>,
     /// Module imports (@use)
@@ -14,6 +16,15 @@ pub struct Program {
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     pub nodes: Vec<Node>,
+}
+
+/// Module declaration for the Index system (replaces documentation)
+/// @module math.arithmetic  OR  @. math.arithmetic
+#[derive(Debug, Clone)]
+pub struct ModuleDecl {
+    /// Dot-separated module path: ["math", "arithmetic"]
+    pub path: Vec<Identifier>,
+    pub span: Span,
 }
 
 /// A module import: @use "path/to/module.bmb" as alias
@@ -87,14 +98,54 @@ pub struct Invariant {
 #[derive(Debug, Clone)]
 pub struct Node {
     pub name: Identifier,
+    /// Tags for Index system (@tags / @#) - replaces documentation
+    pub tags: Vec<Identifier>,
     pub params: Vec<Parameter>,
     pub returns: Type,
-    pub precondition: Option<Expr>,
-    pub postcondition: Option<Expr>,
-    /// Loop invariants: @invariant _label condition
+    /// Multiple preconditions allowed (@pre / @<)
+    pub preconditions: Vec<Expr>,
+    /// Multiple postconditions allowed (@post / @>)
+    pub postconditions: Vec<Expr>,
+    /// Loop invariants: @invariant _label condition (@~ compact)
     pub invariants: Vec<Invariant>,
+    /// Inline assertions: @assert condition (@! compact)
+    pub assertions: Vec<Assert>,
+    /// Test cases: @test expect(...) (@? compact)
+    pub tests: Vec<TestCase>,
     pub body: Vec<Instruction>,
     pub span: Span,
+}
+
+/// An inline assertion (@assert / @!)
+#[derive(Debug, Clone)]
+pub struct Assert {
+    pub condition: Expr,
+    pub span: Span,
+}
+
+/// A test case (@test / @?)
+#[derive(Debug, Clone)]
+pub struct TestCase {
+    /// Test function name (e.g., "expect")
+    pub function: Identifier,
+    /// Test arguments
+    pub args: Vec<TestArg>,
+    pub span: Span,
+}
+
+/// Argument in a test case
+#[derive(Debug, Clone)]
+pub enum TestArg {
+    /// Integer literal
+    Int(i64),
+    /// Float literal
+    Float(f64),
+    /// Boolean literal
+    Bool(bool),
+    /// Variable reference
+    Var(Identifier),
+    /// Function call: factorial(5)
+    Call { func: Identifier, args: Vec<TestArg> },
 }
 
 /// A function parameter

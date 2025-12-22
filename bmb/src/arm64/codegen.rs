@@ -457,11 +457,14 @@ mod tests {
 
         let node = Node {
             name: Identifier::new("main", Span::default()),
+            tags: vec![],
             params: vec![],
             returns: Type::I32,
-            precondition: None,
-            postcondition: None,
+            preconditions: vec![],
+            postconditions: vec![],
             invariants: vec![],
+            assertions: vec![],
+            tests: vec![],
             body: vec![
                 make_stmt(Opcode::Mov, vec![make_reg("a"), Operand::IntLiteral(10)]),
                 make_stmt(Opcode::Mov, vec![make_reg("b"), Operand::IntLiteral(32)]),
@@ -499,11 +502,14 @@ mod tests {
 
         let node = Node {
             name: Identifier::new("main", Span::default()),
+            tags: vec![],
             params: vec![],
             returns: Type::I32,
-            precondition: None,
-            postcondition: None,
+            preconditions: vec![],
+            postconditions: vec![],
             invariants: vec![],
+            assertions: vec![],
+            tests: vec![],
             body: vec![
                 make_stmt(
                     Opcode::Mov,

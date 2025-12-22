@@ -40,13 +40,13 @@ fn format_node(node: &Node) -> String {
     // Return type
     output.push_str(&format!("@returns {}\n", node.returns));
 
-    // Precondition
-    if let Some(ref pre) = node.precondition {
+    // Preconditions (multiple allowed)
+    for pre in &node.preconditions {
         output.push_str(&format!("@pre {}\n", format_expr(pre)));
     }
 
-    // Postcondition
-    if let Some(ref post) = node.postcondition {
+    // Postconditions (multiple allowed)
+    for post in &node.postconditions {
         output.push_str(&format!("@post {}\n", format_expr(post)));
     }
 

@@ -1,12 +1,329 @@
 //! Module system for BMB
 //!
-//! Handles module resolution, loading, and dependency management.
+//! Handles module resolution, loading, dependency management, and module indexing.
+//!
+//! The module system has two main components:
+//! 1. **Module Resolution** (@use): Loading external BMB files
+//! 2. **Module Index** (@module): Building a queryable index of all modules
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::ast::{ModulePath, ModuleUse, Node, Program};
+use crate::ast::{Identifier, ModuleDecl, ModulePath, ModuleUse, Node, Program};
 use crate::{parser, BmbError, Result};
+
+// ========== Module Index System ==========
+
+/// An entry in the module index
+#[derive(Debug, Clone)]
+pub struct ModuleEntry {
+    /// Full module path (e.g., ["math", "arithmetic"])
+    pub path: Vec<String>,
+    /// The module declaration span
+    pub decl_span: crate::ast::Span,
+    /// Nodes defined in this module
+    pub nodes: Vec<String>,
+    /// Tags associated with this module's nodes
+    pub tags: HashSet<String>,
+    /// Source file path (if known)
+    pub source_path: Option<PathBuf>,
+}
+
+impl ModuleEntry {
+    /// Get the full dotted module path
+    pub fn full_path(&self) -> String {
+        self.path.join(".")
+    }
+}
+
+/// A hierarchical tree node for module organization
+#[derive(Debug, Clone, Default)]
+pub struct ModuleTreeNode {
+    /// Name of this tree node
+    pub name: String,
+    /// Module entry if this is a leaf module
+    pub entry: Option<ModuleEntry>,
+    /// Child modules
+    pub children: HashMap<String, ModuleTreeNode>,
+}
+
+impl ModuleTreeNode {
+    /// Create a new tree node
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            entry: None,
+            children: HashMap::new(),
+        }
+    }
+
+    /// Insert a module at the given path
+    fn insert(&mut self, path: &[String], entry: ModuleEntry) {
+        if path.is_empty() {
+            self.entry = Some(entry);
+            return;
+        }
+
+        let first = &path[0];
+        let child = self
+            .children
+            .entry(first.clone())
+            .or_insert_with(|| ModuleTreeNode::new(first));
+        child.insert(&path[1..], entry);
+    }
+
+    /// Get a module at the given path
+    fn get(&self, path: &[String]) -> Option<&ModuleEntry> {
+        if path.is_empty() {
+            return self.entry.as_ref();
+        }
+
+        let first = &path[0];
+        self.children.get(first).and_then(|c| c.get(&path[1..]))
+    }
+
+    /// Get all modules under this node (recursive)
+    fn collect_all(&self, prefix: &[String], results: &mut Vec<ModuleEntry>) {
+        if let Some(ref entry) = self.entry {
+            results.push(entry.clone());
+        }
+
+        for (name, child) in &self.children {
+            let mut new_prefix = prefix.to_vec();
+            new_prefix.push(name.clone());
+            child.collect_all(&new_prefix, results);
+        }
+    }
+
+    /// Get all modules matching a path prefix
+    fn get_by_prefix(&self, prefix: &[String]) -> Vec<ModuleEntry> {
+        if prefix.is_empty() {
+            let mut results = Vec::new();
+            self.collect_all(&[], &mut results);
+            return results;
+        }
+
+        let first = &prefix[0];
+        if let Some(child) = self.children.get(first) {
+            child.get_by_prefix(&prefix[1..])
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Module Index for queryable module discovery
+///
+/// The Index system provides:
+/// - Hierarchical module organization via @module declarations
+/// - Fast lookup by module path
+/// - Tag-based querying for semantic discovery
+///
+/// # Example
+/// ```ignore
+/// let mut index = ModuleIndex::new();
+/// index.add_from_program(&program, Some("math.bmb"));
+///
+/// // Query by path
+/// if let Some(entry) = index.get("math.arithmetic") {
+///     println!("Found module with {} nodes", entry.nodes.len());
+/// }
+///
+/// // Query by tag
+/// let pure_modules = index.find_by_tag("pure");
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct ModuleIndex {
+    /// Hierarchical tree of modules
+    tree: ModuleTreeNode,
+    /// Flat map for fast lookup by full path
+    by_path: HashMap<String, ModuleEntry>,
+    /// Inverted index: tag -> module paths
+    by_tag: HashMap<String, HashSet<String>>,
+}
+
+impl ModuleIndex {
+    /// Create a new empty module index
+    pub fn new() -> Self {
+        Self {
+            tree: ModuleTreeNode::new("root"),
+            by_path: HashMap::new(),
+            by_tag: HashMap::new(),
+        }
+    }
+
+    /// Add a module entry from a parsed program
+    ///
+    /// If the program has a @module declaration, it will be indexed.
+    /// Otherwise, the source path (if provided) will be used as the module name.
+    pub fn add_from_program(&mut self, program: &Program, source_path: Option<&Path>) {
+        let (module_path, decl_span) = if let Some(ref decl) = program.module {
+            let path: Vec<String> = decl.path.iter().map(|id| id.name.clone()).collect();
+            (path, decl.span.clone())
+        } else if let Some(path) = source_path {
+            // Use filename as module name
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("anonymous")
+                .to_string();
+            (vec![name], crate::ast::Span::default())
+        } else {
+            return; // No module declaration and no source path
+        };
+
+        // Collect node names
+        let nodes: Vec<String> = program.nodes.iter().map(|n| n.name.name.clone()).collect();
+
+        // Collect all tags from nodes
+        let mut tags = HashSet::new();
+        for node in &program.nodes {
+            for tag in &node.tags {
+                tags.insert(tag.name.clone());
+            }
+        }
+
+        let entry = ModuleEntry {
+            path: module_path.clone(),
+            decl_span,
+            nodes,
+            tags: tags.clone(),
+            source_path: source_path.map(|p| p.to_path_buf()),
+        };
+
+        let full_path = module_path.join(".");
+
+        // Update inverted tag index
+        for tag in &tags {
+            self.by_tag
+                .entry(tag.clone())
+                .or_default()
+                .insert(full_path.clone());
+        }
+
+        // Insert into tree
+        self.tree.insert(&module_path, entry.clone());
+
+        // Insert into flat map
+        self.by_path.insert(full_path, entry);
+    }
+
+    /// Get a module by its full dotted path
+    ///
+    /// # Example
+    /// ```ignore
+    /// let entry = index.get("math.arithmetic");
+    /// ```
+    pub fn get(&self, path: &str) -> Option<&ModuleEntry> {
+        self.by_path.get(path)
+    }
+
+    /// Get a module by path components
+    pub fn get_by_parts(&self, parts: &[String]) -> Option<&ModuleEntry> {
+        self.tree.get(parts)
+    }
+
+    /// Find all modules matching a path prefix
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Get all modules under "math"
+    /// let math_modules = index.find_by_prefix("math");
+    /// ```
+    pub fn find_by_prefix(&self, prefix: &str) -> Vec<ModuleEntry> {
+        let parts: Vec<String> = if prefix.is_empty() {
+            Vec::new()
+        } else {
+            prefix.split('.').map(|s| s.to_string()).collect()
+        };
+        self.tree.get_by_prefix(&parts)
+    }
+
+    /// Find all modules with a specific tag
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Find all modules tagged as "pure"
+    /// let pure_modules = index.find_by_tag("pure");
+    /// ```
+    pub fn find_by_tag(&self, tag: &str) -> Vec<&ModuleEntry> {
+        if let Some(paths) = self.by_tag.get(tag) {
+            paths.iter().filter_map(|p| self.by_path.get(p)).collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Find all modules with any of the specified tags
+    pub fn find_by_any_tag(&self, tags: &[&str]) -> Vec<&ModuleEntry> {
+        let mut found_paths = HashSet::new();
+        for tag in tags {
+            if let Some(paths) = self.by_tag.get(*tag) {
+                found_paths.extend(paths.iter().cloned());
+            }
+        }
+        found_paths
+            .iter()
+            .filter_map(|p| self.by_path.get(p))
+            .collect()
+    }
+
+    /// Find all modules with all of the specified tags
+    pub fn find_by_all_tags(&self, tags: &[&str]) -> Vec<&ModuleEntry> {
+        if tags.is_empty() {
+            return self.all_modules();
+        }
+
+        // Start with first tag's modules
+        let first_tag = tags[0];
+        let initial_paths: HashSet<String> = self
+            .by_tag
+            .get(first_tag)
+            .cloned()
+            .unwrap_or_default();
+
+        // Intersect with remaining tags
+        let matching_paths = tags[1..].iter().fold(initial_paths, |acc, tag| {
+            if let Some(paths) = self.by_tag.get(*tag) {
+                acc.intersection(paths).cloned().collect()
+            } else {
+                HashSet::new()
+            }
+        });
+
+        matching_paths
+            .iter()
+            .filter_map(|p| self.by_path.get(p))
+            .collect()
+    }
+
+    /// Get all indexed modules
+    pub fn all_modules(&self) -> Vec<&ModuleEntry> {
+        self.by_path.values().collect()
+    }
+
+    /// Get all unique tags across all modules
+    pub fn all_tags(&self) -> Vec<&str> {
+        self.by_tag.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get count of indexed modules
+    pub fn len(&self) -> usize {
+        self.by_path.len()
+    }
+
+    /// Check if index is empty
+    pub fn is_empty(&self) -> bool {
+        self.by_path.is_empty()
+    }
+
+    /// Get the hierarchical tree structure
+    pub fn tree(&self) -> &ModuleTreeNode {
+        &self.tree
+    }
+}
+
+// ========== Module Resolution System ==========
 
 /// A resolved module with its parsed content and dependencies
 #[derive(Debug, Clone)]
@@ -371,17 +688,21 @@ mod tests {
     #[test]
     fn test_merged_program() {
         let main = Program {
+            module: None,
             imports: vec![],
             uses: vec![],
             structs: vec![],
             enums: vec![],
             nodes: vec![crate::ast::Node {
                 name: crate::ast::Identifier::new("main", crate::ast::Span::default()),
+                tags: vec![],
                 params: vec![],
                 returns: crate::ast::Type::I32,
-                precondition: None,
-                postcondition: None,
+                preconditions: vec![],
+                postconditions: vec![],
                 invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
                 body: vec![],
                 span: crate::ast::Span::default(),
             }],
@@ -390,17 +711,21 @@ mod tests {
         let math_module = ResolvedModule {
             path: PathBuf::from("math.bmb"),
             program: Program {
+                module: None,
                 imports: vec![],
                 uses: vec![],
                 structs: vec![],
                 enums: vec![],
                 nodes: vec![crate::ast::Node {
                     name: crate::ast::Identifier::new("add", crate::ast::Span::default()),
+                    tags: vec![],
                     params: vec![],
                     returns: crate::ast::Type::I32,
-                    precondition: None,
-                    postcondition: None,
+                    preconditions: vec![],
+                    postconditions: vec![],
                     invariants: vec![],
+                    assertions: vec![],
+                    tests: vec![],
                     body: vec![],
                     span: crate::ast::Span::default(),
                 }],
@@ -457,17 +782,21 @@ mod tests {
         use crate::types::typecheck_merged;
 
         let main = Program {
+            module: None,
             imports: vec![],
             uses: vec![],
             structs: vec![],
             enums: vec![],
             nodes: vec![crate::ast::Node {
                 name: crate::ast::Identifier::new("caller", crate::ast::Span::default()),
+                tags: vec![],
                 params: vec![],
                 returns: crate::ast::Type::I32,
-                precondition: None,
-                postcondition: None,
+                preconditions: vec![],
+                postconditions: vec![],
                 invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
                 body: vec![
                     crate::ast::Instruction::Statement(crate::ast::Statement {
                         opcode: crate::ast::Opcode::Call,
@@ -502,12 +831,14 @@ mod tests {
         let math_module = ResolvedModule {
             path: PathBuf::from("math.bmb"),
             program: Program {
+                module: None,
                 imports: vec![],
                 uses: vec![],
                 structs: vec![],
                 enums: vec![],
                 nodes: vec![crate::ast::Node {
                     name: crate::ast::Identifier::new("adder", crate::ast::Span::default()),
+                    tags: vec![],
                     params: vec![
                         crate::ast::Parameter {
                             name: crate::ast::Identifier::new("a", crate::ast::Span::default()),
@@ -521,9 +852,11 @@ mod tests {
                         },
                     ],
                     returns: crate::ast::Type::I32,
-                    precondition: None,
-                    postcondition: None,
+                    preconditions: vec![],
+                    postconditions: vec![],
                     invariants: vec![],
+                    assertions: vec![],
+                    tests: vec![],
                     body: vec![],
                     span: crate::ast::Span::default(),
                 }],
@@ -539,5 +872,286 @@ mod tests {
         // Typecheck should succeed because math::adder is registered
         let result = typecheck_merged(&merged);
         assert!(result.is_ok(), "Typecheck failed: {:?}", result.err());
+    }
+
+    // ========== Module Index Tests ==========
+
+    #[test]
+    fn test_module_index_creation() {
+        let index = ModuleIndex::new();
+        assert!(index.is_empty());
+        assert_eq!(index.len(), 0);
+    }
+
+    #[test]
+    fn test_module_index_add_program() {
+        let mut index = ModuleIndex::new();
+
+        // Create a program with @module declaration
+        let program = Program {
+            module: Some(ModuleDecl {
+                path: vec![
+                    Identifier::new("math", crate::ast::Span::default()),
+                    Identifier::new("arithmetic", crate::ast::Span::default()),
+                ],
+                span: crate::ast::Span::default(),
+            }),
+            imports: vec![],
+            uses: vec![],
+            structs: vec![],
+            enums: vec![],
+            nodes: vec![crate::ast::Node {
+                name: Identifier::new("sum", crate::ast::Span::default()),
+                tags: vec![
+                    Identifier::new("pure", crate::ast::Span::default()),
+                    Identifier::new("math", crate::ast::Span::default()),
+                ],
+                params: vec![],
+                returns: crate::ast::Type::I32,
+                preconditions: vec![],
+                postconditions: vec![],
+                invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
+                body: vec![],
+                span: crate::ast::Span::default(),
+            }],
+        };
+
+        index.add_from_program(&program, Some(Path::new("math.bmb")));
+
+        assert_eq!(index.len(), 1);
+        assert!(!index.is_empty());
+
+        // Query by full path
+        let entry = index.get("math.arithmetic");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.path, vec!["math", "arithmetic"]);
+        assert_eq!(entry.nodes, vec!["sum"]);
+        assert!(entry.tags.contains("pure"));
+        assert!(entry.tags.contains("math"));
+    }
+
+    #[test]
+    fn test_module_index_hierarchical() {
+        let mut index = ModuleIndex::new();
+
+        // Add math.arithmetic
+        let program1 = Program {
+            module: Some(ModuleDecl {
+                path: vec![
+                    Identifier::new("math", crate::ast::Span::default()),
+                    Identifier::new("arithmetic", crate::ast::Span::default()),
+                ],
+                span: crate::ast::Span::default(),
+            }),
+            imports: vec![],
+            uses: vec![],
+            structs: vec![],
+            enums: vec![],
+            nodes: vec![crate::ast::Node {
+                name: Identifier::new("sum", crate::ast::Span::default()),
+                tags: vec![Identifier::new("pure", crate::ast::Span::default())],
+                params: vec![],
+                returns: crate::ast::Type::I32,
+                preconditions: vec![],
+                postconditions: vec![],
+                invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
+                body: vec![],
+                span: crate::ast::Span::default(),
+            }],
+        };
+        index.add_from_program(&program1, None);
+
+        // Add math.geometry
+        let program2 = Program {
+            module: Some(ModuleDecl {
+                path: vec![
+                    Identifier::new("math", crate::ast::Span::default()),
+                    Identifier::new("geometry", crate::ast::Span::default()),
+                ],
+                span: crate::ast::Span::default(),
+            }),
+            imports: vec![],
+            uses: vec![],
+            structs: vec![],
+            enums: vec![],
+            nodes: vec![crate::ast::Node {
+                name: Identifier::new("area", crate::ast::Span::default()),
+                tags: vec![Identifier::new("pure", crate::ast::Span::default())],
+                params: vec![],
+                returns: crate::ast::Type::F64,
+                preconditions: vec![],
+                postconditions: vec![],
+                invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
+                body: vec![],
+                span: crate::ast::Span::default(),
+            }],
+        };
+        index.add_from_program(&program2, None);
+
+        // Add io.file
+        let program3 = Program {
+            module: Some(ModuleDecl {
+                path: vec![
+                    Identifier::new("io", crate::ast::Span::default()),
+                    Identifier::new("file", crate::ast::Span::default()),
+                ],
+                span: crate::ast::Span::default(),
+            }),
+            imports: vec![],
+            uses: vec![],
+            structs: vec![],
+            enums: vec![],
+            nodes: vec![crate::ast::Node {
+                name: Identifier::new("read", crate::ast::Span::default()),
+                tags: vec![Identifier::new("io", crate::ast::Span::default())],
+                params: vec![],
+                returns: crate::ast::Type::I32,
+                preconditions: vec![],
+                postconditions: vec![],
+                invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
+                body: vec![],
+                span: crate::ast::Span::default(),
+            }],
+        };
+        index.add_from_program(&program3, None);
+
+        assert_eq!(index.len(), 3);
+
+        // Find all modules under "math"
+        let math_modules = index.find_by_prefix("math");
+        assert_eq!(math_modules.len(), 2);
+
+        // Find all modules (empty prefix)
+        let all_modules = index.find_by_prefix("");
+        assert_eq!(all_modules.len(), 3);
+    }
+
+    #[test]
+    fn test_module_index_tag_query() {
+        let mut index = ModuleIndex::new();
+
+        // Add module with "pure" tag
+        let program1 = Program {
+            module: Some(ModuleDecl {
+                path: vec![Identifier::new("math", crate::ast::Span::default())],
+                span: crate::ast::Span::default(),
+            }),
+            imports: vec![],
+            uses: vec![],
+            structs: vec![],
+            enums: vec![],
+            nodes: vec![crate::ast::Node {
+                name: Identifier::new("sum", crate::ast::Span::default()),
+                tags: vec![
+                    Identifier::new("pure", crate::ast::Span::default()),
+                    Identifier::new("safe", crate::ast::Span::default()),
+                ],
+                params: vec![],
+                returns: crate::ast::Type::I32,
+                preconditions: vec![],
+                postconditions: vec![],
+                invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
+                body: vec![],
+                span: crate::ast::Span::default(),
+            }],
+        };
+        index.add_from_program(&program1, None);
+
+        // Add module with "io" tag
+        let program2 = Program {
+            module: Some(ModuleDecl {
+                path: vec![Identifier::new("io", crate::ast::Span::default())],
+                span: crate::ast::Span::default(),
+            }),
+            imports: vec![],
+            uses: vec![],
+            structs: vec![],
+            enums: vec![],
+            nodes: vec![crate::ast::Node {
+                name: Identifier::new("read", crate::ast::Span::default()),
+                tags: vec![
+                    Identifier::new("io", crate::ast::Span::default()),
+                    Identifier::new("safe", crate::ast::Span::default()),
+                ],
+                params: vec![],
+                returns: crate::ast::Type::I32,
+                preconditions: vec![],
+                postconditions: vec![],
+                invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
+                body: vec![],
+                span: crate::ast::Span::default(),
+            }],
+        };
+        index.add_from_program(&program2, None);
+
+        // Find by single tag
+        let pure_modules = index.find_by_tag("pure");
+        assert_eq!(pure_modules.len(), 1);
+        assert_eq!(pure_modules[0].full_path(), "math");
+
+        let safe_modules = index.find_by_tag("safe");
+        assert_eq!(safe_modules.len(), 2);
+
+        // Find by any tag
+        let any_modules = index.find_by_any_tag(&["pure", "io"]);
+        assert_eq!(any_modules.len(), 2);
+
+        // Find by all tags
+        let both_modules = index.find_by_all_tags(&["pure", "safe"]);
+        assert_eq!(both_modules.len(), 1);
+        assert_eq!(both_modules[0].full_path(), "math");
+
+        // All tags list
+        let all_tags = index.all_tags();
+        assert!(all_tags.contains(&"pure"));
+        assert!(all_tags.contains(&"safe"));
+        assert!(all_tags.contains(&"io"));
+    }
+
+    #[test]
+    fn test_module_index_fallback_to_filename() {
+        let mut index = ModuleIndex::new();
+
+        // Program without @module declaration
+        let program = Program {
+            module: None,
+            imports: vec![],
+            uses: vec![],
+            structs: vec![],
+            enums: vec![],
+            nodes: vec![crate::ast::Node {
+                name: Identifier::new("helper", crate::ast::Span::default()),
+                tags: vec![],
+                params: vec![],
+                returns: crate::ast::Type::I32,
+                preconditions: vec![],
+                postconditions: vec![],
+                invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
+                body: vec![],
+                span: crate::ast::Span::default(),
+            }],
+        };
+
+        // Should use filename as module name
+        index.add_from_program(&program, Some(Path::new("/path/to/utils.bmb")));
+
+        let entry = index.get("utils");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().nodes, vec!["helper"]);
     }
 }

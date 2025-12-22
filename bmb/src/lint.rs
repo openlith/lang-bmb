@@ -63,7 +63,7 @@ pub fn lint(program: &Program) -> Vec<LintWarning> {
 
 fn lint_node(node: &Node, warnings: &mut Vec<LintWarning>) {
     // Check for missing contracts
-    if node.precondition.is_none() && node.postcondition.is_none() {
+    if node.preconditions.is_empty() && node.postconditions.is_empty() {
         warnings.push(LintWarning {
             severity: Severity::Style,
             code: "S001",
@@ -74,7 +74,7 @@ fn lint_node(node: &Node, warnings: &mut Vec<LintWarning>) {
     }
 
     // Check for trivial contracts
-    if let Some(ref pre) = node.precondition {
+    for pre in &node.preconditions {
         if is_trivial_contract(pre) {
             warnings.push(LintWarning {
                 severity: Severity::Info,
@@ -89,7 +89,7 @@ fn lint_node(node: &Node, warnings: &mut Vec<LintWarning>) {
         }
     }
 
-    if let Some(ref post) = node.postcondition {
+    for post in &node.postconditions {
         if is_trivial_contract(post) {
             warnings.push(LintWarning {
                 severity: Severity::Info,
@@ -281,11 +281,11 @@ fn is_trivial_contract(expr: &Expr) -> bool {
 fn collect_used_variables(node: &Node) -> HashSet<String> {
     let mut used = HashSet::new();
 
-    // Check contracts
-    if let Some(ref pre) = node.precondition {
+    // Check contracts (multiple allowed)
+    for pre in &node.preconditions {
         collect_vars_in_expr(pre, &mut used);
     }
-    if let Some(ref post) = node.postcondition {
+    for post in &node.postconditions {
         collect_vars_in_expr(post, &mut used);
     }
 
@@ -349,8 +349,10 @@ fn to_snake_case(name: &str) -> String {
 }
 
 fn has_nonzero_precondition(node: &Node, var_name: &str) -> bool {
-    if let Some(ref pre) = node.precondition {
-        return check_nonzero_condition(pre, var_name);
+    for pre in &node.preconditions {
+        if check_nonzero_condition(pre, var_name) {
+            return true;
+        }
     }
     false
 }

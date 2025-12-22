@@ -449,11 +449,14 @@ mod tests {
         //   ret %result
         let node = Node {
             name: Identifier::new("main", Span::default()),
+            tags: vec![],
             params: vec![],
             returns: Type::I32,
-            precondition: None,
-            postcondition: None,
+            preconditions: vec![],
+            postconditions: vec![],
             invariants: vec![],
+            assertions: vec![],
+            tests: vec![],
             body: vec![
                 Instruction::Statement(Statement {
                     opcode: Opcode::Mov,
@@ -508,11 +511,14 @@ mod tests {
 
         let node = Node {
             name: Identifier::new("add_fn", Span::default()),
+            tags: vec![],
             params: vec![make_param("x", Type::I32), make_param("y", Type::I32)],
             returns: Type::I32,
-            precondition: None,
-            postcondition: None,
+            preconditions: vec![],
+            postconditions: vec![],
             invariants: vec![],
+            assertions: vec![],
+            tests: vec![],
             body: vec![Instruction::Statement(stmt)],
             span: Span::default(),
         };
@@ -568,11 +574,14 @@ mod tests {
 
         let node = Node {
             name: Identifier::new("branch_fn", Span::default()),
+            tags: vec![],
             params: vec![make_param("cond", Type::Bool)],
             returns: Type::I32,
-            precondition: None,
-            postcondition: None,
+            preconditions: vec![],
+            postconditions: vec![],
             invariants: vec![],
+            assertions: vec![],
+            tests: vec![],
             body,
             span: Span::default(),
         };

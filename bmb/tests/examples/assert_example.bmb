@@ -1,0 +1,30 @@
+# Test example with @assert directives
+
+@node safe_divide
+@params a:i32 b:i32
+@returns i32
+@pre b != 0
+@assert b != 0
+
+  div %r a b
+  ret %r
+
+@node positive_increment
+@params x:i32
+@returns i32
+@assert x >= 0
+
+  add %r x 1
+  ret %r
+
+@node bounded_value
+@params n:i32
+@returns i32
+@pre n >= 0
+@pre n <= 100
+@assert n >= 0
+@assert n <= 100
+@post ret >= 0
+
+  mov %r n
+  ret %r

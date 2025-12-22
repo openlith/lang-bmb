@@ -480,6 +480,150 @@ fn test_combined_pre_and_post() {
     assert!(result.is_err(), "should trap on precondition violation");
 }
 
+// ========== Assertion Tests ==========
+
+#[test]
+fn test_assertion_satisfied() {
+    let source = r#"
+# Function with assertion for non-negative input
+@node safe_increment
+@params x:i32
+@returns i32
+@assert x >= 0
+
+  add %r x 1
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let safe_increment = instance
+        .get_typed_func::<i32, i32>(&mut store, "safe_increment")
+        .expect("safe_increment function not found");
+
+    // Test: 5 + 1 = 6 (assertion satisfied)
+    let result = safe_increment.call(&mut store, 5).expect("call failed");
+    assert_eq!(result, 6);
+
+    // Test: 0 + 1 = 1 (assertion satisfied on boundary)
+    let result = safe_increment.call(&mut store, 0).expect("call failed");
+    assert_eq!(result, 1);
+}
+
+#[test]
+fn test_assertion_violated_traps() {
+    let source = r#"
+# Function with assertion for non-negative input
+@node safe_increment
+@params x:i32
+@returns i32
+@assert x >= 0
+
+  add %r x 1
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let safe_increment = instance
+        .get_typed_func::<i32, i32>(&mut store, "safe_increment")
+        .expect("safe_increment function not found");
+
+    // Test: -1 should trap (assertion violated)
+    let result = safe_increment.call(&mut store, -1);
+    assert!(result.is_err(), "should trap on assertion violation");
+}
+
+#[test]
+fn test_multiple_assertions() {
+    let source = r#"
+# Function with multiple assertions
+@node bounded_value
+@params n:i32
+@returns i32
+@assert n >= 0
+@assert n <= 100
+
+  mov %r n
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let bounded_value = instance
+        .get_typed_func::<i32, i32>(&mut store, "bounded_value")
+        .expect("bounded_value function not found");
+
+    // Test: 50 is in range (both assertions satisfied)
+    let result = bounded_value.call(&mut store, 50).expect("call failed");
+    assert_eq!(result, 50);
+
+    // Test: 0 is on lower boundary (both assertions satisfied)
+    let result = bounded_value.call(&mut store, 0).expect("call failed");
+    assert_eq!(result, 0);
+
+    // Test: 100 is on upper boundary (both assertions satisfied)
+    let result = bounded_value.call(&mut store, 100).expect("call failed");
+    assert_eq!(result, 100);
+
+    // Test: -1 should trap (first assertion violated)
+    let result = bounded_value.call(&mut store, -1);
+    assert!(result.is_err(), "should trap on assertion violation");
+
+    // Test: 101 should trap (second assertion violated)
+    let result = bounded_value.call(&mut store, 101);
+    assert!(result.is_err(), "should trap on assertion violation");
+}
+
+#[test]
+fn test_assertion_with_precondition() {
+    let source = r#"
+# Function with both precondition and assertion
+@node safe_divide
+@params a:i32 b:i32
+@returns i32
+@pre b != 0
+@assert b != 0
+
+  div %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let safe_divide = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "safe_divide")
+        .expect("safe_divide function not found");
+
+    // Test: 10 / 2 = 5 (both precondition and assertion satisfied)
+    let result = safe_divide.call(&mut store, (10, 2)).expect("call failed");
+    assert_eq!(result, 5);
+
+    // Test: 10 / 0 should trap (both precondition and assertion violated)
+    let result = safe_divide.call(&mut store, (10, 0));
+    assert!(result.is_err(), "should trap on contract violation");
+}
+
 #[test]
 fn test_execute_loop_with_jmp() {
     let source = r#"

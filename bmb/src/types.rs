@@ -339,8 +339,8 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) ->
         }
     }
 
-    // Type check contracts
-    if let Some(ref pre) = node.precondition {
+    // Type check contracts (multiple preconditions and postconditions allowed)
+    for pre in &node.preconditions {
         let pre_type = typecheck_expr(pre, &env)?;
         if pre_type != Type::Bool {
             return Err(BmbError::TypeError {
@@ -349,7 +349,7 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) ->
         }
     }
 
-    if let Some(ref post) = node.postcondition {
+    for post in &node.postconditions {
         let post_type = typecheck_expr(post, &env)?;
         if post_type != Type::Bool {
             return Err(BmbError::TypeError {

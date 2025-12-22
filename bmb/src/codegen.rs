@@ -251,7 +251,7 @@ impl CodeGenerator {
         }
 
         // Add a result local for postcondition checking if needed
-        let result_local = if node.postcondition.is_some() {
+        let result_local = if !node.postconditions.is_empty() {
             let idx = param_count + local_types.len() as u32;
             local_types.push((1, type_to_valtype(&node.returns)));
             Some(idx)
@@ -272,11 +272,18 @@ impl CodeGenerator {
             all_types.insert(name.clone(), ty.clone());
         }
 
-        // Generate precondition check at function entry
-        if let Some(ref pre) = node.precondition {
+        // Generate precondition checks at function entry (multiple allowed)
+        for pre in &node.preconditions {
             let contract_gen =
                 ContractCodeGenerator::new(&locals, &all_types, node.returns.clone());
             contract_gen.generate_precondition(pre, &mut func);
+        }
+
+        // Generate assertion checks after preconditions (multiple allowed)
+        for assertion in &node.assertions {
+            let contract_gen =
+                ContractCodeGenerator::new(&locals, &all_types, node.returns.clone());
+            contract_gen.generate_assertion(&assertion.condition, &mut func);
         }
 
         // Create function context for code generation
@@ -290,7 +297,7 @@ impl CodeGenerator {
                 .collect(),
             return_type: node.returns.clone(),
             function_indices: &self.function_indices,
-            postcondition: node.postcondition.clone(),
+            postconditions: node.postconditions.clone(),
             all_types: all_types.clone(),
             result_local,
         };
@@ -412,23 +419,26 @@ impl CodeGenerator {
                 // Load return value
                 self.generate_operand(&stmt.operands[0], func, ctx)?;
 
-                // If there's a postcondition, check it before returning
-                if let (Some(ref post), Some(result_local)) = (&ctx.postcondition, ctx.result_local)
-                {
-                    // Store result to check postcondition
-                    func.instruction(&Instruction::LocalSet(result_local));
+                // If there are postconditions, check them before returning
+                if !ctx.postconditions.is_empty() {
+                    if let Some(result_local) = ctx.result_local {
+                        // Store result to check postconditions
+                        func.instruction(&Instruction::LocalSet(result_local));
 
-                    // Generate postcondition check
-                    let mut contract_gen = ContractCodeGenerator::new(
-                        ctx.locals,
-                        &ctx.all_types,
-                        ctx.return_type.clone(),
-                    );
-                    contract_gen.set_result_local(result_local);
-                    contract_gen.generate_postcondition(post, func);
+                        // Generate postcondition checks (all must pass)
+                        for post in &ctx.postconditions {
+                            let mut contract_gen = ContractCodeGenerator::new(
+                                ctx.locals,
+                                &ctx.all_types,
+                                ctx.return_type.clone(),
+                            );
+                            contract_gen.set_result_local(result_local);
+                            contract_gen.generate_postcondition(post, func);
+                        }
 
-                    // Load result for return
-                    func.instruction(&Instruction::LocalGet(result_local));
+                        // Load result for return
+                        func.instruction(&Instruction::LocalGet(result_local));
+                    }
                 }
 
                 func.instruction(&Instruction::Return);
@@ -842,8 +852,8 @@ struct FunctionContext<'a> {
     param_types: HashMap<String, Type>,
     return_type: Type,
     function_indices: &'a HashMap<String, u32>,
-    /// Postcondition expression to check before return
-    postcondition: Option<crate::ast::Expr>,
+    /// Postcondition expressions to check before return (multiple allowed)
+    postconditions: Vec<crate::ast::Expr>,
     /// Combined type map for contract checking
     all_types: HashMap<String, Type>,
     /// Local index for storing result during postcondition check
@@ -1063,11 +1073,14 @@ mod tests {
         TypedNode {
             node: Node {
                 name: Identifier::new(name, Span::default()),
+                tags: vec![],
                 params,
                 returns,
-                precondition: None,
-                postcondition: None,
+                preconditions: vec![],
+                postconditions: vec![],
                 invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
                 body,
                 span: Span::default(),
             },

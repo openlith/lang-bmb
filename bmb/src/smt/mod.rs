@@ -303,6 +303,25 @@ impl NodeVerificationResult {
     }
 }
 
+/// Combine multiple expressions with AND (conjunction)
+fn combine_exprs_and(exprs: &[Expr]) -> Expr {
+    match exprs.len() {
+        0 => Expr::BoolLit(true),
+        1 => exprs[0].clone(),
+        _ => {
+            let mut result = exprs[0].clone();
+            for expr in &exprs[1..] {
+                result = Expr::Binary {
+                    op: BinaryOp::And,
+                    left: Box::new(result),
+                    right: Box::new(expr.clone()),
+                };
+            }
+            result
+        }
+    }
+}
+
 /// Get SMT solver configuration
 fn get_solver_conf() -> Option<SmtConf> {
     // Try environment variable first
@@ -422,19 +441,22 @@ pub fn verify_node(conf: &SmtConf, node: &TypedNode) -> Result<NodeVerificationR
         sort: type_to_smt_sort(&node.node.returns),
     });
 
-    // Verify precondition is satisfiable
-    let pre_result = if let Some(ref pre) = node.node.precondition {
-        verify_satisfiability(conf, &vars, pre)?
+    // Verify preconditions are satisfiable (all ANDed together)
+    let pre_result = if !node.node.preconditions.is_empty() {
+        let combined_pre = combine_exprs_and(&node.node.preconditions);
+        verify_satisfiability(conf, &vars, &combined_pre)?
     } else {
         VerificationResult::Proven
     };
 
-    // Verify postcondition holds given precondition
-    let post_result = if let Some(ref post) = node.node.postcondition {
-        if let Some(ref pre) = node.node.precondition {
-            verify_implication_with_old(conf, &vars, pre, post, &node.node.params)?
+    // Verify postconditions hold given preconditions (all ANDed together)
+    let post_result = if !node.node.postconditions.is_empty() {
+        let combined_post = combine_exprs_and(&node.node.postconditions);
+        if !node.node.preconditions.is_empty() {
+            let combined_pre = combine_exprs_and(&node.node.preconditions);
+            verify_implication_with_old(conf, &vars, &combined_pre, &combined_post, &node.node.params)?
         } else {
-            verify_validity(conf, &vars, post)?
+            verify_validity(conf, &vars, &combined_post)?
         }
     } else {
         VerificationResult::Proven
@@ -707,11 +729,14 @@ pub fn generate_smtlib2(node: &TypedNode) -> Result<String, BmbError> {
     let ret_sort = type_to_smt_sort(&node.node.returns);
     output.push_str(&format!("\n(declare-const ret {})\n\n", ret_sort));
 
-    // Precondition
-    if let Some(ref pre) = node.node.precondition {
-        let smt_pre = translate_expr(pre)?;
-        output.push_str("; Precondition\n");
-        output.push_str(&format!("(assert {})\n\n", smt_pre.to_bool_smtlib()));
+    // Preconditions
+    if !node.node.preconditions.is_empty() {
+        output.push_str("; Preconditions\n");
+        for pre in &node.node.preconditions {
+            let smt_pre = translate_expr(pre)?;
+            output.push_str(&format!("(assert {})\n", smt_pre.to_bool_smtlib()));
+        }
+        output.push('\n');
     }
 
     // Loop invariants
@@ -728,10 +753,11 @@ pub fn generate_smtlib2(node: &TypedNode) -> Result<String, BmbError> {
         output.push('\n');
     }
 
-    // Postcondition check (negated)
-    if let Some(ref post) = node.node.postcondition {
-        let smt_post = translate_expr(post)?;
-        output.push_str("; Postcondition (negated for checking)\n");
+    // Postconditions check (negated - any postcondition failure means contract violated)
+    if !node.node.postconditions.is_empty() {
+        output.push_str("; Postconditions (negated for checking)\n");
+        let combined_post = combine_exprs_and(&node.node.postconditions);
+        let smt_post = translate_expr(&combined_post)?;
         output.push_str(&format!(
             "(assert (not {}))\n\n",
             smt_post.to_bool_smtlib()
@@ -868,6 +894,7 @@ mod tests {
         let node = TypedNode {
             node: Node {
                 name: ident("divide"),
+                tags: vec![],
                 params: vec![
                     Parameter {
                         name: ident("a"),
@@ -881,13 +908,15 @@ mod tests {
                     },
                 ],
                 returns: Type::I32,
-                precondition: Some(Expr::Binary {
+                preconditions: vec![Expr::Binary {
                     op: BinaryOp::Ne,
                     left: Box::new(Expr::Var(ident("b"))),
                     right: Box::new(Expr::IntLit(0)),
-                }),
-                postcondition: Some(Expr::BoolLit(true)),
+                }],
+                postconditions: vec![Expr::BoolLit(true)],
                 invariants: vec![],
+                assertions: vec![],
+                tests: vec![],
                 body: vec![],
                 span: Span::default(),
             },

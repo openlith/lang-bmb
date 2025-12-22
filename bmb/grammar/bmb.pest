@@ -1,14 +1,26 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.3
+// Version 0.4
 //
 // "Omission is guessing, and guessing is error."
+//
+// Self-Describing Syntax:
+//   @ = directive (metadata)
+//   % = register (storage)
+//   _ = label (jump target)
 
 // Whitespace and comments
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
-// Program structure - now includes module uses, struct and enum definitions
-program = { SOI ~ (import | use_module)* ~ (struct_def | enum_def | node)* ~ EOI }
+// Program structure - includes module declaration, imports, types, and nodes
+program = { SOI ~ module_decl? ~ (import | use_module)* ~ (struct_def | enum_def | node)* ~ EOI }
+
+// Module declaration (for Index system - replaces documentation)
+// @module math.arithmetic  OR  @. math.arithmetic (compact)
+module_decl = {
+    ("@module" | "@.") ~ module_name
+}
+module_name = @{ ident ~ ("." ~ ident)* }
 
 // Module import (brings in another BMB module)
 // @use "path/to/module.bmb" as alias
@@ -48,27 +60,60 @@ import = {
 import_params = { type_name ~ ("," ~ type_name)* }
 
 // Node (function) definition
+// Full syntax: @node, @params, @returns, @pre, @post, @tags, @test
+// Compact:     @n,    @p,      @r,       @<,   @>,    @#,    @?
 node = {
-    "@node" ~ ident ~
+    ("@node" | "@n") ~ ident ~
+    node_tags? ~
     params ~
     returns ~
     contracts ~
+    tests ~
     body
 }
 
+// Tags for Index system (replaces documentation)
+// @tags [math, pure, safe]  OR  @# [math, pure, safe] (compact)
+node_tags = {
+    ("@tags" | "@#") ~ "[" ~ tag_list ~ "]"
+}
+tag_list = { ident ~ ("," ~ ident)* }
+
+// Test cases (executable contracts)
+// @test expect(factorial(5), 120)  OR  @? expect(...) (compact)
+tests = { test_case* }
+test_case = {
+    ("@test" | "@?") ~ test_expr
+}
+test_expr = { ident ~ "(" ~ test_args? ~ ")" }
+test_args = { test_arg ~ ("," ~ test_arg)* }
+test_arg = { float_literal | int_literal | bool_literal | ident ~ "(" ~ test_args? ~ ")" | ident }
+
 // Parameters
-params = { "@params" ~ param* }
+// @params a:i32 b:i32  OR  @p a:i32 b:i32 (compact)
+params = { ("@params" | "@p") ~ param* }
 param = { ident ~ ":" ~ type_name }
 
 // Return type
-returns = { "@returns" ~ type_name }
+// @returns i32  OR  @r i32 (compact)
+returns = { ("@returns" | "@r") ~ type_name }
 
-// Contracts (can have multiple @pre, @post, and @invariant)
-contracts = { (pre | post | invariant)* }
-pre = { "@pre" ~ expr }
-post = { "@post" ~ expr }
-// Loop invariant: @invariant _label condition
-invariant = { "@invariant" ~ label_ref ~ expr }
+// Contracts (replaces comments with verifiable rules)
+// Can have multiple @pre, @post, @invariant, @assert
+contracts = { (pre | post | invariant | assert_stmt)* }
+
+// Precondition: @pre condition  OR  @< condition (compact)
+pre = { ("@pre" | "@<") ~ expr }
+
+// Postcondition: @post condition  OR  @> condition (compact)
+post = { ("@post" | "@>") ~ expr }
+
+// Loop invariant: @invariant _label condition  OR  @~ _label condition (compact)
+invariant = { ("@invariant" | "@~") ~ label_ref ~ expr }
+
+// Inline assertion: @assert condition  OR  @! condition (compact)
+// Note: assertions are checked at the point they appear in code
+assert_stmt = { ("@assert" | "@!") ~ expr }
 
 // Function body - explicitly mark start with indented instructions
 body = { (label | stmt)+ }
