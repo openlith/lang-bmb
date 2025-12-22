@@ -28,6 +28,10 @@ pub mod optimize;
 pub mod parser;
 #[cfg(feature = "smt")]
 pub mod smt;
+#[cfg(feature = "smt")]
+pub use smt::{
+    AssertionResult, InvariantResult, NodeVerificationResult, SmtExpr, SmtVar, VerificationResult,
+};
 #[cfg(feature = "cli")]
 pub mod testing;
 pub mod types;

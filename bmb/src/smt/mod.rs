@@ -285,12 +285,20 @@ pub struct InvariantResult {
     pub result: VerificationResult,
 }
 
+/// Result of verifying an assertion
+#[derive(Debug, Clone)]
+pub struct AssertionResult {
+    pub index: usize,
+    pub result: VerificationResult,
+}
+
 /// Result of verifying a single node
 #[derive(Debug, Clone)]
 pub struct NodeVerificationResult {
     pub node_name: String,
     pub precondition: VerificationResult,
     pub postcondition: VerificationResult,
+    pub assertions: Vec<AssertionResult>,
     pub invariants: Vec<InvariantResult>,
 }
 
@@ -299,6 +307,7 @@ impl NodeVerificationResult {
     pub fn all_proven(&self) -> bool {
         self.precondition.is_proven()
             && self.postcondition.is_proven()
+            && self.assertions.iter().all(|a| a.result.is_proven())
             && self.invariants.iter().all(|inv| inv.result.is_proven())
     }
 }
@@ -384,6 +393,18 @@ pub fn verify_program(program: &TypedProgram) -> Result<Vec<NodeVerificationResu
                     postcondition: VerificationResult::SolverNotFound(
                         "No SMT solver found (z3, cvc5, or cvc4)".to_string(),
                     ),
+                    assertions: n
+                        .node
+                        .assertions
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, _)| AssertionResult {
+                            index: idx,
+                            result: VerificationResult::SolverNotFound(
+                                "No SMT solver found (z3, cvc5, or cvc4)".to_string(),
+                            ),
+                        })
+                        .collect(),
                     invariants: n
                         .node
                         .invariants
@@ -462,6 +483,20 @@ pub fn verify_node(conf: &SmtConf, node: &TypedNode) -> Result<NodeVerificationR
         VerificationResult::Proven
     };
 
+    // Verify assertions (given preconditions)
+    let mut assertion_results = Vec::new();
+    for (idx, assertion) in node.node.assertions.iter().enumerate() {
+        // Assertions must hold given preconditions
+        let result = if !node.node.preconditions.is_empty() {
+            let combined_pre = combine_exprs_and(&node.node.preconditions);
+            verify_implication(conf, &vars, &combined_pre, &assertion.condition)?
+        } else {
+            // Without preconditions, check if assertion is always true
+            verify_validity(conf, &vars, &assertion.condition)?
+        };
+        assertion_results.push(AssertionResult { index: idx, result });
+    }
+
     // Verify loop invariants
     let mut invariant_results = Vec::new();
     for inv in &node.node.invariants {
@@ -478,6 +513,7 @@ pub fn verify_node(conf: &SmtConf, node: &TypedNode) -> Result<NodeVerificationR
         node_name: node.node.name.name.clone(),
         precondition: pre_result,
         postcondition: post_result,
+        assertions: assertion_results,
         invariants: invariant_results,
     })
 }
@@ -753,6 +789,20 @@ pub fn generate_smtlib2(node: &TypedNode) -> Result<String, BmbError> {
         output.push('\n');
     }
 
+    // Assertions
+    if !node.node.assertions.is_empty() {
+        output.push_str("; Assertions (@assert directives)\n");
+        for (idx, assertion) in node.node.assertions.iter().enumerate() {
+            let smt_assert = translate_expr(&assertion.condition)?;
+            output.push_str(&format!(
+                "; @assert [{}]\n(assert {})\n",
+                idx,
+                smt_assert.to_bool_smtlib()
+            ));
+        }
+        output.push('\n');
+    }
+
     // Postconditions check (negated - any postcondition failure means contract violated)
     if !node.node.postconditions.is_empty() {
         output.push_str("; Postconditions (negated for checking)\n");
@@ -943,5 +993,108 @@ mod tests {
     fn test_old_var_smtlib() {
         let smt = SmtExpr::OldVar("counter".to_string());
         assert_eq!(smt.to_smtlib(), "old_counter");
+    }
+
+    #[test]
+    fn test_generate_smtlib2_with_assertions() {
+        use crate::ast::{Assert, Node, Parameter};
+        use crate::types::TypedNode;
+
+        let node = TypedNode {
+            node: Node {
+                name: ident("bounded"),
+                tags: vec![],
+                params: vec![Parameter {
+                    name: ident("n"),
+                    ty: Type::I32,
+                    span: Span::default(),
+                }],
+                returns: Type::I32,
+                preconditions: vec![Expr::Binary {
+                    op: BinaryOp::Ge,
+                    left: Box::new(Expr::Var(ident("n"))),
+                    right: Box::new(Expr::IntLit(0)),
+                }],
+                postconditions: vec![],
+                invariants: vec![],
+                assertions: vec![
+                    Assert {
+                        condition: Expr::Binary {
+                            op: BinaryOp::Ge,
+                            left: Box::new(Expr::Var(ident("n"))),
+                            right: Box::new(Expr::IntLit(0)),
+                        },
+                        span: Span::default(),
+                    },
+                    Assert {
+                        condition: Expr::Binary {
+                            op: BinaryOp::Le,
+                            left: Box::new(Expr::Var(ident("n"))),
+                            right: Box::new(Expr::IntLit(100)),
+                        },
+                        span: Span::default(),
+                    },
+                ],
+                tests: vec![],
+                body: vec![],
+                span: Span::default(),
+            },
+            register_types: std::collections::HashMap::new(),
+        };
+
+        let smtlib = generate_smtlib2(&node).unwrap();
+
+        // Check that assertions are included
+        assert!(smtlib.contains("; Assertions (@assert directives)"));
+        assert!(smtlib.contains("; @assert [0]"));
+        assert!(smtlib.contains("; @assert [1]"));
+        assert!(smtlib.contains("(>= n 0)"));
+        assert!(smtlib.contains("(<= n 100)"));
+    }
+
+    #[test]
+    fn test_node_verification_result_all_proven() {
+        // Test with all proven
+        let result = NodeVerificationResult {
+            node_name: "test".to_string(),
+            precondition: VerificationResult::Proven,
+            postcondition: VerificationResult::Proven,
+            assertions: vec![
+                AssertionResult {
+                    index: 0,
+                    result: VerificationResult::Proven,
+                },
+            ],
+            invariants: vec![],
+        };
+        assert!(result.all_proven());
+
+        // Test with assertion not proven
+        let result2 = NodeVerificationResult {
+            node_name: "test2".to_string(),
+            precondition: VerificationResult::Proven,
+            postcondition: VerificationResult::Proven,
+            assertions: vec![
+                AssertionResult {
+                    index: 0,
+                    result: VerificationResult::CounterExample(std::collections::HashMap::new()),
+                },
+            ],
+            invariants: vec![],
+        };
+        assert!(!result2.all_proven());
+    }
+
+    #[test]
+    fn test_verification_result_is_methods() {
+        assert!(VerificationResult::Proven.is_proven());
+        assert!(!VerificationResult::Proven.is_counterexample());
+
+        let ce = VerificationResult::CounterExample(std::collections::HashMap::new());
+        assert!(!ce.is_proven());
+        assert!(ce.is_counterexample());
+
+        assert!(!VerificationResult::Unknown("test".to_string()).is_proven());
+        assert!(!VerificationResult::Unknown("test".to_string()).is_counterexample());
     }
 }

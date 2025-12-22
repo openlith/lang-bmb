@@ -134,6 +134,25 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Verify contracts using SMT solver (Gold level verification)
+    Verify {
+        /// Input BMB source file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// SMT solver to use: z3, cvc4, or cvc5
+        #[arg(long)]
+        solver: Option<String>,
+
+        /// Output SMT-LIB2 script instead of running verification
+        #[arg(long)]
+        emit_smt: bool,
+
+        /// Output verification results as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -157,14 +176,21 @@ fn main() -> ExitCode {
         Commands::Grammar { format, output } => cmd_grammar(format, output),
         Commands::Validate { file, json } => cmd_validate(file, json),
         Commands::Test { file, json } => cmd_test(file, json),
+        Commands::Verify {
+            file,
+            solver,
+            emit_smt,
+            json,
+        } => cmd_verify(file, solver, emit_smt, json),
     }
 }
 
 fn parse_level(level: &str) -> Option<VerificationLevel> {
     match level.to_lowercase().as_str() {
-        "stone" => Some(VerificationLevel::Stone),
-        "bronze" => Some(VerificationLevel::Bronze),
-        "silver" => Some(VerificationLevel::Silver),
+        "stone" | "0" => Some(VerificationLevel::Stone),
+        "bronze" | "1" => Some(VerificationLevel::Bronze),
+        "silver" | "2" => Some(VerificationLevel::Silver),
+        "gold" | "3" => Some(VerificationLevel::Gold),
         _ => None,
     }
 }
@@ -190,7 +216,7 @@ fn cmd_compile(
         Some(l) => l,
         None => {
             eprintln!(
-                "{}: invalid verification level '{}'. Use: stone, bronze, or silver",
+                "{}: invalid verification level '{}'. Use: stone, bronze, silver, or gold",
                 "error".red().bold(),
                 level
             );
@@ -468,7 +494,7 @@ fn cmd_check(file: PathBuf, level: String) -> ExitCode {
         Some(l) => l,
         None => {
             eprintln!(
-                "{}: invalid verification level '{}'. Use: stone, bronze, or silver",
+                "{}: invalid verification level '{}'. Use: stone, bronze, silver, or gold",
                 "error".red().bold(),
                 level
             );
@@ -1052,4 +1078,240 @@ fn cmd_test(file: PathBuf, json: bool) -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+#[cfg(feature = "smt")]
+fn cmd_verify(
+    file: PathBuf,
+    solver: Option<String>,
+    emit_smt: bool,
+    json: bool,
+) -> ExitCode {
+    // Set solver if specified
+    if let Some(ref s) = solver {
+        std::env::set_var("BMB_SMT_SOLVER", s);
+    }
+
+    let source = match fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "{}: could not read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Parse
+    let ast = match bmb::parser::parse(&source) {
+        Ok(a) => a,
+        Err(e) => {
+            print_error(&e, &source);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Type check
+    let typed_ast = match bmb::types::typecheck(&ast) {
+        Ok(t) => t,
+        Err(e) => {
+            print_error(&e, &source);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // If emit_smt, output SMT-LIB2 script
+    if emit_smt {
+        for node in &typed_ast.nodes {
+            match bmb::smt::generate_smtlib2(node) {
+                Ok(script) => {
+                    println!("; === {} ===", node.node.name.name);
+                    println!("{}", script);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{}: failed to generate SMT for '{}': {}",
+                        "error".red().bold(),
+                        node.node.name.name,
+                        e
+                    );
+                }
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    // Run SMT verification
+    let results = match bmb::smt::verify_program(&typed_ast) {
+        Ok(r) => r,
+        Err(e) => {
+            print_error(&e, &source);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if json {
+        let json_output = serde_json::json!({
+            "file": file.display().to_string(),
+            "nodes": results.iter().map(|r| {
+                serde_json::json!({
+                    "name": r.node_name,
+                    "precondition": format_verification_result(&r.precondition),
+                    "postcondition": format_verification_result(&r.postcondition),
+                    "assertions": r.assertions.iter().map(|a| {
+                        serde_json::json!({
+                            "index": a.index,
+                            "result": format_verification_result(&a.result)
+                        })
+                    }).collect::<Vec<_>>(),
+                    "invariants": r.invariants.iter().map(|inv| {
+                        serde_json::json!({
+                            "label": inv.label,
+                            "result": format_verification_result(&inv.result)
+                        })
+                    }).collect::<Vec<_>>(),
+                    "all_proven": r.all_proven()
+                })
+            }).collect::<Vec<_>>()
+        });
+        println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+    } else {
+        println!(
+            "{} Verifying contracts in {} (Gold level)",
+            "SMT".cyan().bold(),
+            file.display()
+        );
+        println!();
+
+        let mut all_proven = true;
+        for result in &results {
+            let status = if result.all_proven() {
+                "✓".green()
+            } else {
+                all_proven = false;
+                "✗".red()
+            };
+
+            println!("{} {}", status, result.node_name.bold());
+
+            // Show precondition result
+            print!("  precondition:  ");
+            print_verification_result(&result.precondition);
+
+            // Show postcondition result
+            print!("  postcondition: ");
+            print_verification_result(&result.postcondition);
+
+            // Show assertion results
+            for assertion in &result.assertions {
+                print!("  @assert [{}]:  ", assertion.index);
+                print_verification_result(&assertion.result);
+            }
+
+            // Show invariant results
+            for inv in &result.invariants {
+                print!("  @invariant _{}: ", inv.label);
+                print_verification_result(&inv.result);
+            }
+            println!();
+        }
+
+        if all_proven {
+            println!(
+                "{} All contracts verified (Gold level achieved)",
+                "OK".green().bold()
+            );
+        } else {
+            println!(
+                "{} Some contracts could not be verified",
+                "WARN".yellow().bold()
+            );
+        }
+    }
+
+    // Return success even if some contracts couldn't be proven
+    // (SolverNotFound is not a failure of the program)
+    ExitCode::SUCCESS
+}
+
+#[cfg(feature = "smt")]
+fn format_verification_result(result: &bmb::smt::VerificationResult) -> serde_json::Value {
+    match result {
+        bmb::smt::VerificationResult::Proven => serde_json::json!({
+            "status": "proven",
+            "message": "Contract mathematically verified"
+        }),
+        bmb::smt::VerificationResult::CounterExample(model) => {
+            if model.is_empty() {
+                serde_json::json!({
+                    "status": "counterexample",
+                    "message": "Counterexample exists (values not extracted)"
+                })
+            } else {
+                serde_json::json!({
+                    "status": "counterexample",
+                    "model": model
+                })
+            }
+        }
+        bmb::smt::VerificationResult::Unknown(msg) => serde_json::json!({
+            "status": "unknown",
+            "message": msg
+        }),
+        bmb::smt::VerificationResult::Unsupported(msg) => serde_json::json!({
+            "status": "unsupported",
+            "message": msg
+        }),
+        bmb::smt::VerificationResult::SolverNotFound(msg) => serde_json::json!({
+            "status": "solver_not_found",
+            "message": msg
+        }),
+    }
+}
+
+#[cfg(feature = "smt")]
+fn print_verification_result(result: &bmb::smt::VerificationResult) {
+    match result {
+        bmb::smt::VerificationResult::Proven => {
+            println!("{}", "proven".green());
+        }
+        bmb::smt::VerificationResult::CounterExample(model) => {
+            if model.is_empty() {
+                println!("{} (values not extracted)", "counterexample".red());
+            } else {
+                println!(
+                    "{}: {:?}",
+                    "counterexample".red(),
+                    model
+                );
+            }
+        }
+        bmb::smt::VerificationResult::Unknown(msg) => {
+            println!("{}: {}", "unknown".yellow(), msg);
+        }
+        bmb::smt::VerificationResult::Unsupported(msg) => {
+            println!("{}: {}", "unsupported".yellow(), msg);
+        }
+        bmb::smt::VerificationResult::SolverNotFound(msg) => {
+            println!("{}: {}", "no solver".dimmed(), msg);
+        }
+    }
+}
+
+#[cfg(not(feature = "smt"))]
+fn cmd_verify(
+    _file: PathBuf,
+    _solver: Option<String>,
+    _emit_smt: bool,
+    _json: bool,
+) -> ExitCode {
+    eprintln!(
+        "{}: SMT verification requires the 'smt' feature. Recompile with:",
+        "error".red().bold()
+    );
+    eprintln!("  cargo build --features smt");
+    ExitCode::FAILURE
 }
