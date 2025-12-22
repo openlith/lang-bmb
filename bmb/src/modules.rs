@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+#[allow(unused_imports)] // Used in tests
 use crate::ast::{Identifier, ModuleDecl, ModulePath, ModuleUse, Node, Program};
 use crate::{parser, BmbError, Result};
 

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use wasm_encoder::{
     BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection,
-    Instruction, MemArg, MemorySection, MemoryType, Module, TypeSection, ValType,
+    Instruction, MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 
 use crate::ast::{self, Node, Opcode, Operand, Statement, Type};
@@ -155,7 +155,8 @@ impl CodeGenerator {
         }
     }
 
-    /// Get layout for a struct by name
+    /// Get layout for a struct by name (for future struct field access)
+    #[allow(dead_code)]
     fn get_struct_layout(&self, name: &str) -> Option<&StructLayout> {
         self.struct_layouts.get(name)
     }
