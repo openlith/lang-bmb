@@ -50,15 +50,47 @@ A BMB program consists of one or more **nodes** (functions).
 
 ## Types
 
-BMB supports the following primitive types:
+### Primitive Types
 
-| Type | Description | Size | Range |
-|------|-------------|------|-------|
-| `i32` | 32-bit signed integer | 4 bytes | -2,147,483,648 to 2,147,483,647 |
-| `i64` | 64-bit signed integer | 8 bytes | -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 |
-| `f32` | 32-bit floating point | 4 bytes | IEEE 754 single precision |
-| `f64` | 64-bit floating point | 8 bytes | IEEE 754 double precision |
-| `bool` | Boolean | 1 byte | `true` or `false` |
+| Type | Description | Size | WASM Mapping |
+|------|-------------|------|--------------|
+| `i8` | 8-bit signed integer | 1 byte | i32 |
+| `i16` | 16-bit signed integer | 2 bytes | i32 |
+| `i32` | 32-bit signed integer | 4 bytes | i32 |
+| `i64` | 64-bit signed integer | 8 bytes | i64 |
+| `u8` | 8-bit unsigned integer | 1 byte | i32 (masked) |
+| `u16` | 16-bit unsigned integer | 2 bytes | i32 (masked) |
+| `u32` | 32-bit unsigned integer | 4 bytes | i32 |
+| `u64` | 64-bit unsigned integer | 8 bytes | i64 |
+| `f32` | 32-bit floating point | 4 bytes | f32 |
+| `f64` | 64-bit floating point | 8 bytes | f64 |
+| `bool` | Boolean | 1 byte | i32 |
+| `char` | Unicode scalar value | 4 bytes | i32 |
+
+### Composite Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `[T; N]` | Fixed-size array | `[u8; 256]` |
+| `&T` | Immutable reference | `&i32` |
+| `*T` | Raw pointer | `*u8` |
+
+### Character and String Literals
+
+```bmb
+# Character literal (single quotes)
+mov %c 'A'           # ASCII: 65
+mov %c '한'          # Unicode: 54620
+mov %c '\n'          # Newline: 10
+mov %c '\x41'        # Hex escape: 65
+mov %c '\u{D55C}'    # Unicode escape: 54620
+
+# String literal (double quotes, stored as byte array)
+@data greeting "Hello, World!"
+
+# Byte array literal
+@data bytes [72, 101, 108, 108, 111]  # "Hello"
+```
 
 ### Type Promotion in Contracts
 

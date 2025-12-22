@@ -12,8 +12,16 @@
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
-// Program structure - includes module declaration, imports, types, and nodes
-program = { SOI ~ module_decl? ~ (import | use_module)* ~ (struct_def | enum_def | node)* ~ EOI }
+// Program structure - includes module declaration, imports, types, data, and nodes
+program = { SOI ~ module_decl? ~ (import | use_module)* ~ (struct_def | enum_def | data_def)* ~ node* ~ EOI }
+
+// Data segment definition (static byte data in memory)
+// @data name "string literal"
+// @data name [1, 2, 3, 4]  # byte array
+data_def = {
+    "@data" ~ ident ~ (str_literal | byte_array)
+}
+byte_array = { "[" ~ int_literal ~ ("," ~ int_literal)* ~ "]" }
 
 // Module declaration (for Index system - replaces documentation)
 // @module math.arithmetic  OR  @. math.arithmetic (compact)
@@ -135,7 +143,7 @@ opcode = @{
 
 // Operands
 // qualified_ident must come before ident to match module.function patterns
-operand = { register | label_ref | str_literal | float_literal | int_literal | field_access | array_access | qualified_ident | ident }
+operand = { register | label_ref | str_literal | char_literal | float_literal | int_literal | field_access | array_access | qualified_ident | ident }
 
 // Qualified identifier for module references: module.function
 qualified_ident = { ident ~ "::" ~ ident }
@@ -154,12 +162,28 @@ str_literal = ${ "\"" ~ str_inner ~ "\"" }
 str_inner = @{ str_char* }
 str_char = { !("\"" | "\\") ~ ANY | "\\" ~ ("\"" | "\\" | "n" | "r" | "t" | "0") }
 
+// Character literal: 'A', '한', '\n', '\x41'
+char_literal = ${ "'" ~ char_inner ~ "'" }
+char_inner = @{ char_escape | (!("'" | "\\") ~ ANY) }
+char_escape = { "\\" ~ ("'" | "\\" | "n" | "r" | "t" | "0" | hex_escape | unicode_escape) }
+hex_escape = { "x" ~ ASCII_HEX_DIGIT{2} }
+unicode_escape = { "u" ~ "{" ~ ASCII_HEX_DIGIT{1,6} ~ "}" }
+
 // Types
-// type_spec is the main type rule (supports arrays, references, user types)
-type_spec = { array_type | ref_type | primitive_type | user_type }
+// type_spec is the main type rule (supports arrays, references, pointers, user types)
+type_spec = { array_type | ref_type | ptr_type | primitive_type | user_type }
 
 // Primitive types
-primitive_type = { "i32" | "i64" | "f32" | "f64" | "bool" | "void" }
+// Signed: i8, i16, i32, i64
+// Unsigned: u8, u16, u32, u64
+// Float: f32, f64
+// Other: bool, char, void
+primitive_type = {
+    "i64" | "i32" | "i16" | "i8" |
+    "u64" | "u32" | "u16" | "u8" |
+    "f64" | "f32" |
+    "bool" | "char" | "void"
+}
 
 // Array type: [T; N] where T is element type and N is size
 array_type = { "[" ~ type_spec ~ ";" ~ array_size ~ "]" }
@@ -167,6 +191,9 @@ array_size = @{ ASCII_DIGIT+ }
 
 // Reference type: &T
 ref_type = { "&" ~ type_spec }
+
+// Pointer type: *T (raw pointer for low-level memory access)
+ptr_type = { "*" ~ type_spec }
 
 // User-defined type (struct or enum name)
 user_type = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }

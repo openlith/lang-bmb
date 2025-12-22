@@ -248,15 +248,41 @@ _zero:
 
 ### 4.3 Primitive Types
 
-| Type | Description |
-| --- | --- |
-| `i32`, `i64` | Signed integers (fixed width) |
-| `f32`, `f64` | IEEE 754 Floating point |
-| `bool` | Boolean (`true`/`false`) |
-| `[T; N]` | Fixed-size array |
-| `&T` | Immutable reference |
+| Type | Description | WASM Mapping |
+| --- | --- | --- |
+| `i8`, `i16`, `i32`, `i64` | Signed integers | i32/i64 |
+| `u8`, `u16`, `u32`, `u64` | Unsigned integers | i32/i64 (masked) |
+| `f32`, `f64` | IEEE 754 Floating point | f32/f64 |
+| `bool` | Boolean (`true`/`false`) | i32 |
+| `char` | Unicode scalar value (U+0000..U+10FFFF) | i32 |
 
-### 4.4 Instruction Set Architecture (ISA)
+### 4.4 Composite Types
+
+| Type | Description | Example |
+| --- | --- | --- |
+| `[T; N]` | Fixed-size array | `[u8; 256]` |
+| `&T` | Immutable reference | `&i32` |
+| `*T` | Raw pointer | `*u8` |
+
+### 4.5 String Representation
+
+BMB는 편의 문법 없이 문자열을 명시적으로 표현합니다:
+
+```bmb
+# 문자열 = 바이트 배열 + 길이
+@struct Str
+  ptr:*u8      # UTF-8 바이트 포인터
+  len:u64      # 바이트 길이
+
+# 문자 리터럴
+mov %c 'A'           # char = 65 (ASCII)
+mov %c '한'          # char = 54620 (Unicode)
+
+# 바이트 문자열 (data segment)
+@data hello "Hello"  # [u8; 5] in memory
+```
+
+### 4.6 Instruction Set Architecture (ISA)
 
 | Category | Opcodes |
 | --- | --- |
@@ -265,7 +291,7 @@ _zero:
 | Control Flow | `ret`, `jmp`, `jif`, `call` |
 | Memory | `mov`, `load`, `store` |
 
-### 4.5 Operand Syntax
+### 4.7 Operand Syntax
 
 | Form | Meaning | Example |
 | --- | --- | --- |
