@@ -1,6 +1,6 @@
 # BMB - Bare-Metal-Banter Specification
 
-**Version:** 0.5.0
+**Version:** 0.6.0
 
 ---
 
@@ -436,7 +436,11 @@ _b:
 | 0.3 | Module system, ARM64 support |
 | 0.4 | Index system, compact syntax, AI integration |
 | 0.5 | SMT verification (Gold level) |
-| 1.0 | Production-ready release |
+| 0.6 | Gotgan package manager integration |
+| 0.7 | Production hardening |
+| 0.8 | Self-hosting preparation |
+| 0.9 | Bootstrapping |
+| 1.0 | Self-hosted BMB compiler (bootstrapping complete) |
 
 ---
 
