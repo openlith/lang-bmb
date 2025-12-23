@@ -68,9 +68,125 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ---
 
-## v0.8.0: Standard Library - Collections
+## v0.8.0: Efficient Explicitness & Collections
 
-**Goal**: Fundamental data structures with full contract coverage
+**Goal**: Token-efficient syntax without compromising "Omission is guessing" philosophy, plus fundamental data structures
+
+> **Design Principle**: "Signal Density Maximization" - Optimize for *useful information per token*, not token reduction. BMB is AI-native: explicit contracts are signals that boost AI accuracy, not noise to be minimized.
+
+### Part 1: Signal Density Optimization
+
+> **AI-Native Principle**: BMB optimizes for *signal density*, not token reduction. Explicit contracts are signals that HELP AI accuracy. The goal is maximizing useful information per token, not minimizing tokens.
+
+| Task | Priority | Complexity | Status | AI Impact |
+|------|----------|------------|--------|-----------|
+| Refined Types (`@type`) | Critical | High | Planned | ✅ High signal (type name = constraint) |
+| Spec-Defined Defaults (zero-init) | Low | Medium | Conditional | ⚠️ Needs tooling (AI requires spec injection) |
+| Auto-SSA operator (`!`) | Low | Medium | Deferred | ❌ Hidden state harms AI understanding |
+
+#### Refined Types (`@type`)
+
+Embed constraints in type definitions. Constraints become part of the type's identity.
+
+```bmb
+# Type definitions with embedded constraints
+@type nz_i32 i32 where self != 0
+@type pos_i32 i32 where self > 0
+@type percent u8 where self <= 100
+@type index[N] u64 where self < N
+
+# Usage - constraint is part of the type, not hidden
+@node divide
+@params a:i32 b:nz_i32    # b != 0 is explicit in type name
+@returns i32
+@post ret * b == a
+
+  div %r a b
+  ret %r
+```
+
+**Semantic Rules**:
+- Refined type expands to base type + constraint at verification time
+- SMT solver receives full constraint: `(assert (not (= b 0)))`
+- No information is hidden; type name documents the constraint
+
+**Philosophy Alignment**:
+- ✅ Constraints are explicit (in type definition)
+- ✅ No guessing (type name reveals constraint)
+- ✅ Mathematically complete (SMT receives full expansion)
+
+#### Spec-Defined Defaults (Zero-Initialization) [Conditional]
+
+**Status**: Conditional on tooling support. Requires `.bmbmap` or LSP to inject specification context.
+
+All registers are zero-initialized by language specification. This is **not** implicit behavior—it is **specified behavior** documented in the language spec.
+
+```bmb
+# Old style (explicit initialization)
+mov %i 0
+mov %sum 0
+
+# New style (spec-defined default)
+# %i and %sum are i32, spec says: "i32 initializes to 0"
+# No guessing - behavior is defined by spec, not assumed
+```
+
+**Specification Rule**:
+> "Every register of type T is initialized to T's zero-value upon declaration. Zero-values: integers → 0, floats → 0.0, bool → false, pointers → null."
+
+**Philosophy Alignment**:
+- ✅ Not omission (spec explicitly defines behavior)
+- ✅ Not guessing (documented, deterministic)
+- ✅ Mathematically equivalent to explicit `mov %r 0`
+
+**AI-Native Concern** (Research-backed):
+- ⚠️ AI models don't inherently know BMB spec
+- ⚠️ Without spec injection, AI sees "uninitialized" registers
+- ⚠️ "Lost in the middle" phenomenon: spec rules often ignored if not proximate
+
+**Tooling Requirement**:
+- `.bmbmap` must include zero-value table for AI context
+- LSP hover must show "initialized to 0 (BMB spec §4.3)"
+- IDE integration must surface spec-defined behavior at point of use
+
+**Adoption Gate**: Implement only after Structural Synthesis (v0.11.0) provides spec injection mechanism.
+
+#### Auto-SSA Operator (`!`) [Deferred]
+
+**Status**: Deferred indefinitely. Hidden state tracking fundamentally conflicts with AI-native design.
+
+Explicit version increment for SSA without manual naming.
+
+```bmb
+# Manual SSA versioning
+add %i_1 %i 1
+add %i_2 %i_1 1
+
+# Auto-SSA with explicit operator (DEFERRED)
+add %i! %i 1    # Creates next version of %i
+add %i! %i 1    # Creates another version
+```
+
+**AI-Native Analysis** (Research-backed):
+- ❌ **Hidden state**: AI must track invisible version numbers mentally
+- ❌ **Context burden**: AI accuracy degrades with implicit state tracking
+- ❌ **Error debugging**: When AI generates `%i!`, which version did it mean?
+- ❌ **"Lost in the middle"**: Version context easily forgotten in long functions
+
+**Contrast with Explicit SSA**:
+```bmb
+# Explicit SSA - AI sees exactly what it's working with
+add %i_1 %i 1     # Clear: %i_1 depends on %i
+add %i_2 %i_1 1   # Clear: %i_2 depends on %i_1
+```
+
+**Decision**: The verbosity cost of explicit SSA names is the correct trade-off for AI-native design. Token count is not the goal; signal clarity is.
+
+**Reconsideration Criteria**:
+- Only if research demonstrates AI accuracy improves with Auto-SSA
+- Only if tooling can perfectly reconstruct version history for AI context
+
+### Part 2: Standard Library - Collections
 
 | Task | Priority | Complexity |
 |------|----------|------------|
@@ -81,14 +197,15 @@ v1.0.0: Performance Transcendence Complete 🎯
 | `Slice<T>` - view into array | High | Medium |
 | `Range` - iteration bounds | High | Low |
 
-**Contract Examples**:
+**Contract Examples** (using Refined Types):
 ```bmb
+@type cap_u64 u64 where self > 0
+
 @struct Vector
   data:*T
   len:u64
-  cap:u64
+  cap:cap_u64           # Capacity is always positive (refined type)
   @constraint len <= cap
-  @constraint cap > 0 || data == null
 
 @node vector_push
 @params v:&Vector<T> item:T
@@ -99,6 +216,9 @@ v1.0.0: Performance Transcendence Complete 🎯
 ```
 
 **Success Criteria**:
+- Refined Types grammar and type checker implemented
+- Spec-defined defaults documented and implemented
+- Auto-SSA experimental flag available
 - All collections have full @pre/@post contracts
 - Gold-level verification passes for core operations
 
@@ -272,7 +392,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ## v0.11.0: Diagnostics & Tooling
 
-**Goal**: Actionable error messages, SMT counterexamples, and contract assistance
+**Goal**: Actionable error messages, SMT counterexamples, contract assistance, and structural analysis
 
 | Task | Priority | Complexity |
 |------|----------|------------|
@@ -281,8 +401,54 @@ v1.0.0: Performance Transcendence Complete 🎯
 | Fix suggestions in errors | High | Medium |
 | IDE integration (LSP enhancements) | High | Medium |
 | **Invariant suggestion mode** | High | Very High |
+| **Structural Synthesis (`.bmbmap`)** | High | High |
 | Coverage reporting | Medium | Medium |
 | Performance profiling hooks | Low | Medium |
+
+### Structural Synthesis (`.bmbmap`)
+
+Auto-generated project architecture map. The compiler scans the codebase and synthesizes structural metadata—developers write logic, the tool generates the map.
+
+```bash
+# Generate structural map
+bmbc map --output project.bmbmap
+
+# Query the map
+bmbc query --map project.bmbmap --callers "auth.validate"
+bmbc query --map project.bmbmap --data-flow "user_input -> database"
+```
+
+**Generated `.bmbmap` Contents**:
+```yaml
+# Auto-generated - DO NOT EDIT
+version: 0.11.0
+generated: 2025-12-23T10:00:00Z
+
+modules:
+  auth:
+    nodes: [validate, hash_password, check_token]
+    verified_level: gold
+
+call_graph:
+  main -> auth.validate -> db.query
+
+data_flow:
+  user_input:
+    sources: [http.request]
+    sinks: [db.query]
+    contracts_applied: [sanitize, validate]
+
+contract_coverage:
+  total_nodes: 45
+  with_pre: 42
+  with_post: 38
+  gold_verified: 30
+```
+
+**Philosophy Alignment**:
+- Tool generates metadata, not developer
+- No syntax changes to BMB language
+- Supplements contracts, doesn't replace them
 
 ### Invariant Suggestion Mode
 
@@ -824,6 +990,8 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 8.1 | 2025-12-23 | AI-Native re-evaluation: "Signal Density" replaces "Token Efficiency"; Spec-Defined Defaults conditional on tooling; Auto-SSA deferred |
+| 8.0 | 2025-12-23 | v0.8.0 "Efficient Explicitness": Refined Types, Spec-Defined Defaults, Auto-SSA; v0.11.0 adds Structural Synthesis |
 | 7.1 | 2025-12-23 | v0.10.0 expanded to "Low-Level Safety": @consume, @device, @volatile; v0.11.0 adds invariant suggestion mode |
 | 7.0 | 2025-12-23 | v0.7.0 complete: @requires chaining, @pure verification, @invariant runtime checks |
 | 6.0 | 2025-12-23 | Version restructure: v1.0.0 = Performance Transcendence, all prior stages v0.x |

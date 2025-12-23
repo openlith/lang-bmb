@@ -1,6 +1,6 @@
 # BMB - Bare-Metal-Banter Specification
 
-**Version:** 0.7.1-draft
+**Version:** 0.8.0-draft
 
 ---
 
@@ -386,13 +386,50 @@ _zero:
 
 ### 4.3 Primitive Types
 
-| Type | Description | WASM Mapping |
-| --- | --- | --- |
-| `i8`, `i16`, `i32`, `i64` | Signed integers | i32/i64 |
-| `u8`, `u16`, `u32`, `u64` | Unsigned integers | i32/i64 (masked) |
-| `f32`, `f64` | IEEE 754 Floating point | f32/f64 |
-| `bool` | Boolean (`true`/`false`) | i32 |
-| `char` | Unicode scalar value (U+0000..U+10FFFF) | i32 |
+| Type | Description | WASM Mapping | Zero-Value |
+| --- | --- | --- | --- |
+| `i8`, `i16`, `i32`, `i64` | Signed integers | i32/i64 | `0` |
+| `u8`, `u16`, `u32`, `u64` | Unsigned integers | i32/i64 (masked) | `0` |
+| `f32`, `f64` | IEEE 754 Floating point | f32/f64 | `0.0` |
+| `bool` | Boolean (`true`/`false`) | i32 | `false` |
+| `char` | Unicode scalar value (U+0000..U+10FFFF) | i32 | `'\0'` |
+
+#### Spec-Defined Defaults (v0.8+) [Conditional]
+
+**Status**: Conditional on tooling support. Requires `.bmbmap` or LSP to inject specification context for AI-native workflows.
+
+All registers are initialized to their type's zero-value by language specification. This is **specified behavior**, not implicit behavior.
+
+**Specification Rule**:
+> Every register of type T is initialized to T's zero-value upon first use in a scope. This is semantically equivalent to an explicit `mov %r 0` instruction.
+
+```bmb
+@node example
+@params n:i32
+@returns i32
+
+  # %sum is i32, spec defines: initialized to 0
+  # Equivalent to: mov %sum 0
+  add %sum %sum n    # %sum starts at 0 by spec
+  ret %sum
+```
+
+**Philosophy Alignment**:
+- ✅ Behavior is specified, not assumed
+- ✅ Compiler may optimize away redundant initializations
+- ✅ SMT solver treats as explicit initialization
+
+**AI-Native Concern**:
+- ⚠️ AI models don't inherently know BMB spec
+- ⚠️ Without spec injection, AI sees "uninitialized" registers
+- ⚠️ "Lost in the middle" phenomenon: spec rules may be ignored if not proximate to code
+
+**Tooling Requirement** (for full adoption):
+- `.bmbmap` must include zero-value table in project metadata
+- LSP hover must show "initialized to 0 (BMB spec §4.3)"
+- IDE integration must surface spec-defined behavior at point of use
+
+**Adoption Gate**: Full adoption when Structural Synthesis (v0.11.0) provides spec injection mechanism. Until then, explicit initialization (`mov %r 0`) is recommended for AI-generated code.
 
 ### 4.4 Composite Types
 
@@ -402,7 +439,74 @@ _zero:
 | `&T` | Immutable reference | `&i32` |
 | `*T` | Raw pointer | `*u8` |
 
-### 4.5 String Representation
+### 4.5 Refined Types (v0.8+)
+
+Refined types embed constraints directly in type definitions. The constraint becomes part of the type's identity and is expanded at verification time.
+
+#### Syntax
+
+```bmb
+@type <name> <base_type> where <constraint>
+@type <name>[<params>] <base_type> where <constraint>
+```
+
+#### Examples
+
+```bmb
+# Simple refined types
+@type nz_i32 i32 where self != 0           # Non-zero integer
+@type pos_i32 i32 where self > 0           # Positive integer
+@type percent u8 where self <= 100         # 0-100 range
+
+# Parameterized refined types
+@type index[N] u64 where self < N          # Valid array index
+@type bounded[LO, HI] i32 where self >= LO && self <= HI
+
+# Usage
+@node safe_divide
+@params a:i32 b:nz_i32                     # Constraint in type name
+@returns i32
+@post ret * b == a
+
+  div %r a b
+  ret %r
+```
+
+#### Semantics
+
+1. **Type Expansion**: At verification time, `b:nz_i32` expands to `b:i32` + `@pre b != 0`
+2. **SMT Translation**: Refined type constraints are added to the SMT assertion set
+3. **Subtyping**: `pos_i32` is a subtype of `nz_i32` (positive implies non-zero)
+
+#### Verification Flow
+
+```
+Source: @params b:nz_i32
+   ↓ (Type Expansion)
+Expanded: @params b:i32
+          @pre b != 0
+   ↓ (SMT Translation)
+SMT: (assert (not (= b 0)))
+```
+
+#### Built-in Refined Types (stdlib, v0.8+)
+
+| Type | Base | Constraint | Use Case |
+| --- | --- | --- | --- |
+| `nz_i32` | `i32` | `self != 0` | Division denominator |
+| `pos_i32` | `i32` | `self > 0` | Array length |
+| `nonneg_i32` | `i32` | `self >= 0` | Array index |
+| `percent` | `u8` | `self <= 100` | Percentage values |
+
+#### Philosophy Alignment
+
+| Concern | Answer |
+| --- | --- |
+| Is this implicit? | No. Type name explicitly documents constraint. |
+| Is this guessing? | No. Constraint is specified in `@type` definition. |
+| Is verification complete? | Yes. SMT receives full expanded constraints. |
+
+### 4.6 String Representation
 
 BMB는 편의 문법 없이 문자열을 명시적으로 표현합니다:
 
@@ -442,7 +546,7 @@ mov %c '한'          # char = 54620 (Unicode)
 
 **중요**: `@data`로 정의된 데이터는 불변(immutable)이며, 수정 시도는 런타임 트랩을 발생시킵니다.
 
-### 4.6 Instruction Set Architecture (ISA)
+### 4.7 Instruction Set Architecture (ISA)
 
 | Category | Opcodes |
 | --- | --- |
@@ -478,16 +582,65 @@ mov %c '한'          # char = 54620 (Unicode)
 | `shr` | Shift right | `shr %r a n` → `a >> n` |
 | `not` | Bitwise NOT | `not %r a` → `~a` |
 
-### 4.7 Operand Syntax
+### 4.8 Operand Syntax
 
 | Form | Meaning | Example |
 | --- | --- | --- |
 | `%name` | Register | `%result`, `%temp` |
+| `%name!` | ~~Auto-SSA register~~ (deferred, see §4.9) | N/A |
 | `123` | Integer literal | `42`, `-1` |
 | `1.5` | Float literal | `3.14`, `-0.5` |
 | `true/false` | Boolean literal | `true` |
 | `_label` | Jump target | `_exit`, `_loop` |
 | `name` | Parameter reference | `a`, `b` |
+
+### 4.9 Auto-SSA Operator [Deferred]
+
+**Status**: Deferred indefinitely. Hidden state tracking fundamentally conflicts with AI-native design.
+
+The `!` operator was proposed to explicitly request a new SSA version of a register, maintaining SSA discipline while reducing manual version naming.
+
+#### Proposed Syntax (NOT IMPLEMENTED)
+
+```bmb
+add %i! %i 1    # Would create next version of %i (e.g., %i_v2)
+add %i! %i 1    # Would create another version (e.g., %i_v3)
+```
+
+#### AI-Native Analysis
+
+Research revealed that Auto-SSA fundamentally conflicts with BMB's AI-native design:
+
+| Concern | Impact |
+|---------|--------|
+| **Hidden state** | AI must track invisible version numbers mentally |
+| **Context burden** | AI accuracy degrades with implicit state tracking |
+| **Error debugging** | When AI generates `%i!`, which version did it mean? |
+| **"Lost in the middle"** | Version context easily forgotten in long functions |
+
+#### Recommended Alternative: Explicit SSA
+
+```bmb
+# RECOMMENDED: Explicit SSA names
+mov %i 0
+add %i_1 %i 1     # Clear: %i_1 depends on %i
+add %i_2 %i_1 1   # Clear: %i_2 depends on %i_1
+ret %i_2          # Clear: returning version 2
+```
+
+Every register name carries its version information explicitly. This is **higher signal density**—the token cost is the correct trade-off for AI-native clarity.
+
+#### Philosophy Consideration
+
+The original proposal passed the philosophy check ("explicit version increment"), but failed the AI-native check ("visible state"). BMB's v0.8+ evaluation framework requires both checks to pass.
+
+**Decision**: The verbosity cost of explicit SSA names is the correct trade-off. Token count is not the goal; signal clarity is.
+
+#### Reconsideration Criteria
+
+Only reconsider if:
+- Research demonstrates AI accuracy improves with Auto-SSA (unlikely)
+- Tooling can perfectly reconstruct version history for AI context injection
 
 ---
 
@@ -1012,19 +1165,26 @@ DIRECTIVES (@)           CONTRACTS               VERIFICATION
 @test / @?              @requires / @&
 @file                   @assert / @!!
 @data                   @constraint
+@type (v0.8+)
 
 REGISTERS (%)           TYPES                   OPCODES
 ─────────────────       ─────────────────       ─────────────────
 %name                   i8-i64, u8-u64          Arithmetic: add sub mul div mod
-%result                 f32, f64                Bitwise: and or xor shl shr not
-%temp                   bool, char              Compare: eq ne lt le gt ge
-                        [T; N], &T, *T          Control: ret jmp jif call
+%name! (auto-ssa)       f32, f64                Bitwise: and or xor shl shr not
+%result                 bool, char              Compare: eq ne lt le gt ge
+%temp                   [T; N], &T, *T          Control: ret jmp jif call
                                                 Memory: mov load store
-LABELS (_)              POINTER PREDICATES
+LABELS (_)              REFINED TYPES (v0.8+)
 ─────────────────       ─────────────────
-_name:                  valid(ptr)
-_loop:                  not_null(ptr)
-_exit:                  aligned(ptr, n)
+_name:                  @type nz_i32 i32 where self != 0
+_loop:                  @type pos_i32 i32 where self > 0
+_exit:                  @type index[N] u64 where self < N
+
+                        POINTER PREDICATES
+                        ─────────────────
+                        valid(ptr)
+                        not_null(ptr)
+                        aligned(ptr, n)
                         in_bounds(ptr, base, len)
                         no_alias(ptr1, ptr2)
 ```
