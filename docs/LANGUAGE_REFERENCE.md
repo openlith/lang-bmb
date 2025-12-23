@@ -168,6 +168,19 @@ add %counter %counter 1
 
 Contracts specify function invariants that must hold.
 
+### Contract Types
+
+| Contract | Purpose | Verification | Compact |
+|----------|---------|--------------|---------|
+| `@pre` | Precondition | Runtime/SMT | `@<` |
+| `@post` | Postcondition | Runtime/SMT | `@>` |
+| `@invariant` | Loop invariant | SMT | `@~` |
+| `@variant` | Termination proof | SMT | `@%` |
+| `@pure` | No side effects | Static | `@!` |
+| `@requires` | Contract reference | Static | `@&` |
+| `@assert` | Inline assertion | Runtime | `@!!` |
+| `@test` | Test case | Test runner | `@?` |
+
 ### Preconditions (`@pre`)
 
 Preconditions specify requirements that must be true before function execution:
@@ -182,6 +195,31 @@ Postconditions specify guarantees after function execution:
 
 ```bmb
 @post ret >= 0  # Result is non-negative
+```
+
+### Termination Proofs (`@variant`)
+
+Variant expressions must decrease with each recursive call or loop iteration:
+
+```bmb
+@node factorial
+@params n:i32
+@returns i32
+@variant n           # n decreases toward 0
+@pre n >= 0
+@post ret >= 1
+```
+
+### Purity (`@pure`)
+
+Pure functions have no side effects and are referentially transparent:
+
+```bmb
+@node square
+@params x:i32
+@returns i32
+@pure                # Can be memoized, parallelized
+@post ret == x * x
 ```
 
 ### The `ret` Keyword
@@ -276,6 +314,7 @@ BMB provides multiple verification levels:
 | 0 | Stone | Parsing success | 🪨 |
 | 1 | Bronze | Type safety | 🥉 |
 | 2 | Silver | Contract verification (runtime) | 🥈 |
+| 3 | Gold | Static proof via SMT solver | 🥇 |
 
 ### Using Verification Levels
 
@@ -285,7 +324,18 @@ bmbc check --level silver example.bmb
 
 # Compile with level verification
 bmbc compile --level bronze example.bmb
+
+# Full SMT verification (Gold level)
+bmbc verify example.bmb --solver z3
 ```
+
+### Gold Level Requirements
+
+For Gold-level verification:
+- All `@pre` and `@post` must be provable by SMT solver
+- Recursive functions require `@variant` for termination proof
+- Loops require `@invariant` for correctness proof
+- `@pure` functions verified for referential transparency
 
 ---
 

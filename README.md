@@ -53,7 +53,8 @@ BMB does not assume intent. If it isn't in the code, it doesn't exist.
 |-------|------|-----------|-------|
 | 0 | Stone | Parsing success | 🪨 |
 | 1 | Bronze | Type safety | 🥉 |
-| 2 | Silver | Contract verification | 🥈 |
+| 2 | Silver | Runtime contract verification | 🥈 |
+| 3 | Gold | Static proof via SMT solver | 🥇 |
 
 ---
 
@@ -148,9 +149,11 @@ BMB aims for the "One-Shot" development cycle. By making the language harder to 
 2. **Verified Firmware:** Direct hardware control with mathematically proven contracts replacing runtime checks.
 3. **High-Assurance Software:** Systems where formal verification is mandatory, not optional.
 
-### Why BMB Works Well with AI Code Generation
+### Structural Clarity (A Side Effect)
 
-BMB's strict, unambiguous grammar makes it inherently suitable for LLM-based code generation. Unlike languages with implicit behaviors and syntactic sugar, BMB leaves no room for "hallucinated" assumptions—what is written is exactly what is meant. This is a side effect of the language design, not its primary goal.
+BMB's strict, unambiguous grammar makes it inherently suitable for automated code generation and verification. Unlike languages with implicit behaviors and syntactic sugar, BMB leaves no room for ambiguity—what is written is exactly what is meant.
+
+> **Note**: This is a natural consequence of BMB's design philosophy, not its primary goal. BMB optimizes for precision and verifiability; the resulting clarity benefits all tooling, including AI assistants.
 
 ---
 
