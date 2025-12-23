@@ -37,6 +37,7 @@ pub fn parse(source: &str) -> Result<Program> {
     let mut module = None;
     let mut imports = Vec::new();
     let mut uses = Vec::new();
+    let mut type_defs = Vec::new();
     let mut structs = Vec::new();
     let mut enums = Vec::new();
     let mut contracts = Vec::new();
@@ -54,6 +55,9 @@ pub fn parse(source: &str) -> Result<Program> {
                 }
                 Rule::use_module => {
                     uses.push(parse_use_module(pair)?);
+                }
+                Rule::type_def => {
+                    type_defs.push(parse_type_def(pair)?);
                 }
                 Rule::struct_def => {
                     structs.push(parse_struct_def(pair)?);
@@ -77,6 +81,7 @@ pub fn parse(source: &str) -> Result<Program> {
         module,
         imports,
         uses,
+        type_defs,
         structs,
         enums,
         contracts,
@@ -201,6 +206,61 @@ fn parse_enum_def(pair: pest::iterators::Pair<Rule>) -> Result<EnumDef> {
     Ok(EnumDef {
         name,
         variants,
+        span,
+    })
+}
+
+/// Parse a refined type definition: @type nz_i32 i32 where self != 0
+/// Grammar: type_def = { ("@type" | "@#t") ~ ident ~ type_params? ~ type_spec ~ "where" ~ expr }
+fn parse_type_def(pair: pest::iterators::Pair<Rule>) -> Result<TypeDef> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    // Parse type name (e.g., "nz_i32", "pos_i32", "index")
+    let name = parse_identifier(inner.next().unwrap())?;
+
+    // Parse optional type parameters and base type
+    let mut params = Vec::new();
+    let mut base_type = None;
+    let mut constraint = None;
+
+    for item in inner {
+        match item.as_rule() {
+            Rule::type_params => {
+                // type_params = { "[" ~ ident ~ ("," ~ ident)* ~ "]" }
+                for param_pair in item.into_inner() {
+                    if param_pair.as_rule() == Rule::ident {
+                        params.push(parse_identifier(param_pair)?);
+                    }
+                }
+            }
+            Rule::type_spec | Rule::type_name => {
+                base_type = Some(parse_type(item)?);
+            }
+            Rule::expr => {
+                constraint = Some(parse_expr(item)?);
+            }
+            _ => {}
+        }
+    }
+
+    let base_type = base_type.ok_or_else(|| BmbError::ParseError {
+        line: 0,
+        column: 0,
+        message: "Refined type definition missing base type".to_string(),
+    })?;
+
+    let constraint = constraint.ok_or_else(|| BmbError::ParseError {
+        line: 0,
+        column: 0,
+        message: "Refined type definition missing constraint expression".to_string(),
+    })?;
+
+    Ok(TypeDef {
+        name,
+        params,
+        base_type,
+        constraint,
         span,
     })
 }
@@ -894,6 +954,10 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr> {
         Rule::ret_keyword => {
             // 'ret' keyword in contracts refers to the return value
             Ok(Expr::Ret)
+        }
+        Rule::self_keyword => {
+            // 'self' keyword in refined type constraints refers to the value being constrained
+            Ok(Expr::SelfRef)
         }
         Rule::old_expr => {
             // old(expr) refers to the pre-state value of an expression
@@ -1786,6 +1850,181 @@ _base:
                 _ => panic!("Expected nested pointer type"),
             },
             _ => panic!("Expected pointer type"),
+        }
+    }
+
+    // ==================== Refined Types Tests (v0.8+) ====================
+
+    #[test]
+    fn test_parse_refined_type_simple() {
+        // Basic refined type: @type nz_i32 i32 where self != 0
+        let source = r#"
+@type nz_i32 i32 where self != 0
+
+@node test
+@params
+@returns i32
+
+  ret 1
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Simple refined type should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.type_defs.len(), 1);
+        assert_eq!(program.type_defs[0].name.name, "nz_i32");
+        assert_eq!(program.type_defs[0].base_type, Type::I32);
+        assert!(program.type_defs[0].params.is_empty());
+    }
+
+    #[test]
+    fn test_parse_refined_type_positive() {
+        // Positive integer type: @type pos_i32 i32 where self > 0
+        let source = r#"
+@type pos_i32 i32 where self > 0
+
+@node test
+@params
+@returns i32
+
+  ret 1
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Positive refined type should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.type_defs.len(), 1);
+        assert_eq!(program.type_defs[0].name.name, "pos_i32");
+    }
+
+    #[test]
+    fn test_parse_refined_type_with_params() {
+        // Parameterized refined type: @type index[N] u64 where self < N
+        let source = r#"
+@type index[N] u64 where self < N
+
+@node test
+@params
+@returns i32
+
+  ret 1
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Parameterized refined type should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.type_defs.len(), 1);
+        assert_eq!(program.type_defs[0].name.name, "index");
+        assert_eq!(program.type_defs[0].params.len(), 1);
+        assert_eq!(program.type_defs[0].params[0].name, "N");
+        assert_eq!(program.type_defs[0].base_type, Type::U64);
+    }
+
+    #[test]
+    fn test_parse_refined_type_compact() {
+        // Compact syntax: @#t nz_i32 i32 where self != 0
+        let source = r#"
+@#t nz_i32 i32 where self != 0
+
+@node test
+@params
+@returns i32
+
+  ret 1
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Compact refined type syntax should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.type_defs.len(), 1);
+        assert_eq!(program.type_defs[0].name.name, "nz_i32");
+    }
+
+    #[test]
+    fn test_parse_refined_type_complex_constraint() {
+        // Complex constraint: @type bounded_i32 i32 where self >= 0 && self <= 100
+        let source = r#"
+@type bounded_i32 i32 where self >= 0 && self <= 100
+
+@node test
+@params
+@returns i32
+
+  ret 1
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Complex constraint refined type should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.type_defs.len(), 1);
+        assert_eq!(program.type_defs[0].name.name, "bounded_i32");
+    }
+
+    #[test]
+    fn test_parse_multiple_refined_types() {
+        // Multiple refined types
+        let source = r#"
+@type nz_i32 i32 where self != 0
+@type pos_i32 i32 where self > 0
+@type neg_i32 i32 where self < 0
+
+@node test
+@params
+@returns i32
+
+  ret 1
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Multiple refined types should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.type_defs.len(), 3);
+        assert_eq!(program.type_defs[0].name.name, "nz_i32");
+        assert_eq!(program.type_defs[1].name.name, "pos_i32");
+        assert_eq!(program.type_defs[2].name.name, "neg_i32");
+    }
+
+    #[test]
+    fn test_parse_self_keyword_in_constraint() {
+        // Verify self is parsed as SelfRef in constraint expression
+        let source = r#"
+@type nz_i32 i32 where self != 0
+
+@node test
+@params
+@returns i32
+
+  ret 1
+"#;
+        let result = parse(source);
+        assert!(result.is_ok());
+        let program = result.unwrap();
+
+        // Check that the constraint contains SelfRef
+        match &program.type_defs[0].constraint {
+            Expr::Binary { left, .. } => match &**left {
+                Expr::SelfRef => {} // Expected
+                other => panic!("Expected SelfRef, got {:?}", other),
+            },
+            other => panic!("Expected Binary expression, got {:?}", other),
         }
     }
 }

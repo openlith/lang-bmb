@@ -93,6 +93,8 @@ fn type_size_align(ty: &Type) -> (u32, u32) {
         Type::Ref(_) | Type::Ptr(_) => (4, 4),
         // Struct and Enum are handled via layout calculation
         Type::Struct(_) | Type::Enum(_) => (4, 4), // Placeholder - actual size from registry
+        // Refined types use their base type's size (resolved at type check time)
+        Type::Refined { .. } => (4, 4), // Placeholder - actual size from type registry
     }
 }
 
@@ -1262,6 +1264,7 @@ fn type_to_valtype(ty: &Type) -> ValType {
         Type::Enum(_) => ValType::I32,      // Enum discriminant
         Type::Ref(_) => ValType::I32,       // Reference pointer
         Type::Ptr(_) => ValType::I32,       // Raw pointer
+        Type::Refined { .. } => ValType::I32, // Refined type (resolved to base type at check time)
     }
 }
 

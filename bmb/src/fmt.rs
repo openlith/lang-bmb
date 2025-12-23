@@ -160,6 +160,7 @@ fn format_expr(expr: &Expr) -> String {
             };
             format!("{}{}", op_str, operand_str)
         }
+        Expr::SelfRef => "self".to_string(),
     }
 }
 

@@ -13,6 +13,8 @@ pub struct Program {
     pub imports: Vec<Import>,
     /// Module imports (@use)
     pub uses: Vec<ModuleUse>,
+    /// Refined type definitions (@type) - v0.8+
+    pub type_defs: Vec<TypeDef>,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     /// Named contract definitions (@contract)
@@ -92,6 +94,22 @@ pub struct ContractDef {
     pub preconditions: Vec<Expr>,
     /// Postconditions (@post)
     pub postconditions: Vec<Expr>,
+    pub span: Span,
+}
+
+/// A refined type definition (@type / @#t) - v0.8+
+/// Signal Density Optimization: constraints embedded in type names
+/// Example: @type nz_i32 i32 where self != 0
+#[derive(Debug, Clone)]
+pub struct TypeDef {
+    /// Type name (e.g., "nz_i32", "pos_i32")
+    pub name: Identifier,
+    /// Type parameters for parameterized refined types (e.g., [N] in index[N])
+    pub params: Vec<Identifier>,
+    /// Base type being refined
+    pub base_type: Type,
+    /// Constraint expression (uses `self` to refer to the value)
+    pub constraint: Expr,
     pub span: Span,
 }
 
@@ -237,6 +255,15 @@ pub enum Type {
     Ref(Box<Type>),
     /// Pointer type: *T (raw pointer for low-level memory access)
     Ptr(Box<Type>),
+    /// Refined type reference (v0.8+)
+    /// References a refined type by name, e.g., nz_i32, pos_i32
+    /// The constraint is expanded at verification time
+    Refined {
+        /// Name of the refined type
+        name: String,
+        /// Type arguments for parameterized refined types (e.g., [N] values as strings)
+        args: Vec<String>,
+    },
 }
 
 impl Type {
@@ -338,6 +365,13 @@ impl fmt::Display for Type {
             Type::Enum(name) => write!(f, "{}", name),
             Type::Ref(inner) => write!(f, "&{}", inner),
             Type::Ptr(inner) => write!(f, "*{}", inner),
+            Type::Refined { name, args } => {
+                if args.is_empty() {
+                    write!(f, "{}", name)
+                } else {
+                    write!(f, "{}[{}]", name, args.join(", "))
+                }
+            }
         }
     }
 }
@@ -508,6 +542,8 @@ pub enum Expr {
     Ret,
     /// Old value reference (for postconditions): old(x) refers to x's value at function entry
     Old(Box<Expr>),
+    /// Self reference (for refined type constraints): refers to the value being constrained
+    SelfRef,
 }
 
 /// Binary operators

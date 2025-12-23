@@ -108,6 +108,10 @@ impl From<&Type> for IrType {
 
             // Complex types lowered to I32 (pointer for WASM32)
             Type::Array { .. } | Type::Struct(_) | Type::Enum(_) => IrType::I32,
+
+            // Refined types use their base type's IR representation
+            // (resolved during type checking)
+            Type::Refined { .. } => IrType::I32,
         }
     }
 }

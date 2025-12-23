@@ -325,6 +325,17 @@ fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
                 })
             }
         }
+        Type::Refined { name, .. } => {
+            // TODO: Validate refined type exists in registry when type registry supports it
+            // For now, accept all refined types (will be validated in Phase 2)
+            if name.is_empty() {
+                Err(BmbError::TypeError {
+                    message: "Refined type name cannot be empty".to_string(),
+                })
+            } else {
+                Ok(())
+            }
+        }
     }
 }
 
@@ -874,6 +885,15 @@ fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type> {
         // old(expr) has the same type as the inner expression
         // Used in postconditions to reference pre-state values
         Expr::Old(inner) => typecheck_expr(inner, env),
+        // SelfRef is only valid in refined type constraint contexts
+        // Its type depends on the base type being refined
+        Expr::SelfRef => {
+            // In normal expression context, SelfRef is an error
+            // It should only appear in type constraints
+            Err(BmbError::TypeError {
+                message: "'self' keyword is only valid in refined type constraints".to_string(),
+            })
+        }
     }
 }
 

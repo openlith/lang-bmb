@@ -138,8 +138,10 @@ fn substitute_expr(expr: &Expr, substitution: &HashMap<String, &Expr>) -> Expr {
             operand: Box::new(substitute_expr(operand, substitution)),
         },
         Expr::Old(inner) => Expr::Old(Box::new(substitute_expr(inner, substitution))),
-        // Literals and Ret don't need substitution
-        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ret => expr.clone(),
+        // Literals, Ret, and SelfRef don't need substitution
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ret | Expr::SelfRef => {
+            expr.clone()
+        }
     }
 }
 
@@ -324,7 +326,12 @@ fn validate_contract_expr(expr: &Expr, _contract_type: &str, _function_name: &st
             // old(expr) is valid in postconditions to refer to pre-state values
             validate_contract_expr(inner, _contract_type, _function_name)?;
         }
-        Expr::Var(_) | Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ret => {
+        Expr::Var(_)
+        | Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ret
+        | Expr::SelfRef => {
             // Valid leaf nodes
         }
     }
@@ -644,6 +651,12 @@ impl<'a> ContractCodeGenerator<'a> {
                 // TODO: Implement proper old() support with saved locals
                 self.generate_expr_with_type(inner, target_type, func);
             }
+            Expr::SelfRef => {
+                // SelfRef is only valid in refined type constraints
+                // During codegen, it should have been substituted with the actual value
+                // If we reach here, it's a bug - generate a placeholder for now
+                func.instruction(&WasmInstruction::I32Const(0));
+            }
         }
     }
 
@@ -701,6 +714,9 @@ impl<'a> ContractCodeGenerator<'a> {
             },
             // old(expr) has the same type as the inner expression
             Expr::Old(inner) => self.infer_expr_type(inner),
+            // SelfRef type depends on context (refined type constraint)
+            // During normal codegen, this should be substituted; default to I32
+            Expr::SelfRef => Type::I32,
         }
     }
 }
@@ -719,9 +735,12 @@ pub fn type_to_valtype(ty: &Type) -> ValType {
         Type::F64 => ValType::F64,
         Type::Void => ValType::I32, // Void uses i32 as placeholder
         // Compound types use i32 as pointer/reference
-        Type::Array { .. } | Type::Struct(_) | Type::Enum(_) | Type::Ref(_) | Type::Ptr(_) => {
-            ValType::I32
-        }
+        Type::Array { .. }
+        | Type::Struct(_)
+        | Type::Enum(_)
+        | Type::Ref(_)
+        | Type::Ptr(_)
+        | Type::Refined { .. } => ValType::I32,
     }
 }
 

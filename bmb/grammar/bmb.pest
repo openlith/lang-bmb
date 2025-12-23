@@ -1,5 +1,9 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.6
+// Version 0.8
+//
+// Changes in 0.8:
+//   - Added @type refined type definitions with constraints
+//   - Signal Density Optimization: explicit constraints in type names
 //
 // Changes in 0.6:
 //   - Added bitwise opcodes: and, or, xor, shl, shr, not
@@ -12,6 +16,7 @@
 //   - Changed @assert compact from @! to @!!
 //
 // "Omission is guessing, and guessing is error."
+// "Signal density over token count." (AI-Native, v0.8+)
 //
 // Self-Describing Syntax:
 //   @ = directive (metadata)
@@ -23,7 +28,16 @@ WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
 // Program structure - includes module declaration, imports, types, contracts, data, and nodes
-program = { SOI ~ module_decl? ~ (import | use_module)* ~ (struct_def | enum_def | contract_def | data_def)* ~ node* ~ EOI }
+program = { SOI ~ module_decl? ~ (import | use_module)* ~ (type_def | struct_def | enum_def | contract_def | data_def)* ~ node* ~ EOI }
+
+// Refined type definition (v0.8+, Signal Density Optimization)
+// @type nz_i32 i32 where self != 0
+// @type pos_i32 i32 where self > 0
+// @type index[N] u64 where self < N
+type_def = {
+    ("@type" | "@#t") ~ ident ~ type_params? ~ type_spec ~ "where" ~ expr
+}
+type_params = { "[" ~ ident ~ ("," ~ ident)* ~ "]" }
 
 // Named contract definition (reusable contract templates)
 // @contract positive_range(n:i32, max:i32)
@@ -258,8 +272,10 @@ unary_op = { "!" | "-" }
 
 // 'ret' is a special keyword in contracts that refers to return value
 // 'old(expr)' refers to the pre-state value of an expression
-primary = { "(" ~ expr ~ ")" | old_expr | float_literal | int_literal | bool_literal | ret_keyword | ident }
+// 'self' refers to the value being constrained in refined types (v0.8+)
+primary = { "(" ~ expr ~ ")" | old_expr | float_literal | int_literal | bool_literal | ret_keyword | self_keyword | ident }
 ret_keyword = { "ret" ~ !ASCII_ALPHANUMERIC }
+self_keyword = { "self" ~ !ASCII_ALPHANUMERIC }
 old_expr = { "old" ~ "(" ~ expr ~ ")" }
 
 // Literals
