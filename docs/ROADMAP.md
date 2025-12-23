@@ -344,16 +344,342 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 
 ---
 
-## Post-v1.0: Future Directions
+## Post-v1.0: Performance Transcendence Roadmap
+
+> **Vision**: Surpass C/Rust performance through proof-guided optimization
+>
+> BMB's contract system enables optimizations impossible in languages where the compiler must assume the worst case. When contracts are proven, the compiler gains knowledge that enables aggressive optimizations.
+
+### Phase Overview
+
+```
+v1.0 (Foundation) → v1.1-1.3 (Bronze) → v1.4-1.6 (Silver) → v1.7-2.0 (Gold)
+     Self-hosted      Language Core       LLVM Integration     Transcendence
+```
+
+---
+
+### Bronze Stage (v1.1 - v1.3): Language Foundation
+
+**Goal**: Complete language features enabling advanced optimization
+
+#### v1.1: Region-Based Memory
+
+| Task | Description | Research Basis |
+|------|-------------|----------------|
+| `@region` declaration | Named memory regions | Cyclone/MLKit model |
+| Region polymorphism | Functions parameterized by region | MLKit stack allocation |
+| Escape analysis | Auto stack/heap allocation | Go/Java JVM escape analysis |
+| `@no_escape` annotation | Guarantee no pointer escape | LLVM noalias generation |
+
+**Contract Examples**:
+```bmb
+@region local
+  @node process_data
+  @params data:*i32@local len:u32
+  @returns i32
+  @pre valid_region(data, len, local)
+  @post no_escape(data)    # Enables stack allocation
+    # ... processing ...
+```
+
+**Success Criteria**:
+- Region-scoped allocation verified at compile time
+- Stack allocation for non-escaping data
+
+#### v1.2: Effect System
+
+| Task | Description | Research Basis |
+|------|-------------|----------------|
+| `@effect` annotation | Declare side effects | Koka effect system |
+| Effect inference | Automatic effect detection | Type-and-effects systems |
+| `@pure` verification | Prove no side effects | Referential transparency |
+| Effect polymorphism | Generic over effects | Effect handlers |
+
+**Effect Categories**:
+```bmb
+@effect IO        # File/network operations
+@effect Alloc     # Memory allocation
+@effect Panic     # Can trap/abort
+@effect Diverge   # May not terminate
+
+@node pure_compute
+@params x:i32 y:i32
+@returns i32
+@pure                    # No effects allowed
+@effect !IO !Alloc       # Explicit effect denial
+  add %r x y
+  ret %r
+```
+
+**Success Criteria**:
+- Effect system integrates with contract verification
+- @pure functions provably side-effect free
+
+#### v1.3: Liquid Types
+
+| Task | Description | Research Basis |
+|------|-------------|----------------|
+| Refinement type syntax | `x:i32{x > 0}` inline | Liquid Haskell, F* |
+| SMT predicate embedding | Type predicates → SMT | Liquid Types paper |
+| Refinement inference | Automatic refinement | LiquidHaskell |
+| Bounds check elimination | Proven bounds → no check | Dependent ML |
+
+**Type Examples**:
+```bmb
+# Type-level refinements replace runtime checks
+@typedef PosInt = i32{v > 0}
+@typedef BoundedIdx = u32{v < len}
+
+@node safe_index
+@params arr:[i32; 100] idx:u32{idx < 100}
+@returns i32
+  # No bounds check needed - proven at type level
+  load %val arr idx
+  ret %val
+```
+
+**Success Criteria**:
+- Refinement types integrate with @pre/@post
+- Automatic bounds check elimination for proven cases
+
+---
+
+### Silver Stage (v1.4 - v1.6): LLVM Integration
+
+**Goal**: Translate contract knowledge into LLVM optimization hints
+
+#### v1.4: LLVM Backend Foundation
+
+| Task | Description | Priority |
+|------|-------------|----------|
+| LLVM IR generation | Basic codegen | Critical |
+| Type mapping | BMB → LLVM types | Critical |
+| Function ABI | Calling conventions | Critical |
+| Basic optimization passes | mem2reg, simplifycfg | High |
+
+**LLVM Integration Strategy**:
+```
+BMB Source → AST → TypedProgram → VerifiedProgram → LLVM IR → Native
+                                        ↓
+                                   SMT Proofs
+                                        ↓
+                                  LLVM Metadata
+```
+
+#### v1.5: Contract-Driven Metadata
+
+| Task | Description | LLVM Feature |
+|------|-------------|--------------|
+| Range metadata | Proven value ranges | `!range` |
+| Noalias annotations | Proven non-aliasing | `noalias`, `restrict` |
+| Nonnull pointers | Proven non-null | `!nonnull` |
+| Alignment info | Proven alignment | `align` attribute |
+| Dereferenceable | Safe to load | `dereferenceable` |
+
+**Metadata Injection**:
+```llvm
+; From @pre x > 0 && x < 100
+define i32 @process(i32 %x) {
+  ; BMB injects: x has range [1, 99]
+  %x.range = !{i32 1, i32 100}
+
+  ; From @pre no_alias(a, b)
+  define void @swap(i32* noalias %a, i32* noalias %b)
+
+  ; From @pre not_null(ptr)
+  define i32 @deref(i32* nonnull dereferenceable(4) %ptr)
+}
+```
+
+**Success Criteria**:
+- Contract proofs generate LLVM metadata
+- 10-30% performance improvement over basic codegen
+
+#### v1.6: Advanced LLVM Optimization
+
+| Task | Description | Research Basis |
+|------|-------------|----------------|
+| Loop metadata | Vectorization hints | LLVM loop metadata |
+| Profile-guided opt | Runtime → compile hints | PGO (5-30% gains) |
+| Alive2 integration | Verify optimizations | SMT-based verification |
+| Link-time optimization | Whole-program opt | LTO/ThinLTO |
+
+**PGO Integration**:
+```bash
+# Stage 1: Instrumented build
+bmbc compile program.bmb --emit llvm --pgo-gen -o program.prof
+
+# Stage 2: Profile collection
+./program.prof < typical_input.txt
+
+# Stage 3: Optimized build
+bmbc compile program.bmb --emit llvm --pgo-use=profile.data -o program
+```
+
+**Success Criteria**:
+- PGO integration achieves 10-20% additional speedup
+- Alive2 verifies optimization correctness
+
+---
+
+### Gold Stage (v1.7 - v2.0): Performance Transcendence
+
+**Goal**: Surpass C/Rust through proof-guided optimization
+
+#### v1.7: Proof-Guided Loop Optimization
+
+| Task | Description | Optimization Enabled |
+|------|-------------|---------------------|
+| Invariant code motion | Move proven-invariant code | Loop hoisting |
+| Bounds elimination | Proven bounds → no check | Vectorization enable |
+| Iteration bounds | Proven trip count | Loop unrolling |
+| Dependence analysis | Proven independence | Parallelization |
+
+**Optimization Example**:
+```bmb
+@node sum_array
+@params arr:[i32; N] len:u32
+@returns i64
+@pre len <= N              # Proves bounds
+@invariant _loop i < len   # Enables vectorization
+
+  mov %sum 0
+  mov %i 0
+_loop:
+  lt %cond %i len
+  jif %cond _body _done
+_body:
+  # No bounds check - proven by invariant
+  load %val arr %i
+  add %sum %sum %val
+  add %i %i 1
+  jmp _loop
+_done:
+  ret %sum
+```
+
+**Generated LLVM** (with proof metadata):
+```llvm
+define i64 @sum_array([N x i32]* %arr, i32 %len) {
+  ; Loop vectorization enabled - bounds proven safe
+  !{!"llvm.loop.vectorize.enable", i1 true}
+  ; No bounds checks in loop body
+}
+```
+
+#### v1.8: Comptime Execution
+
+| Task | Description | Research Basis |
+|------|-------------|----------------|
+| `@comptime` annotation | Compile-time execution | Zig comptime |
+| Constant propagation | Extended folding | @pure + comptime |
+| Type computation | Type-level values | Dependent types |
+| Generic instantiation | Monomorphization | Rust generics |
+
+**Comptime Examples**:
+```bmb
+@comptime
+@node factorial_ct
+@params n:u64
+@returns u64
+@pre n <= 20
+@pure
+  # Executes at compile time
+  eq %base n 0
+  jif %base _one _recurse
+_one:
+  ret 1
+_recurse:
+  sub %n1 n 1
+  call %sub factorial_ct %n1
+  mul %r n %sub
+  ret %r
+
+# Usage - computed at compile time
+@node main
+@returns u64
+  # factorial_ct(10) = 3628800 (computed at compile time)
+  mov %result @comptime factorial_ct(10)
+  ret %result
+```
+
+#### v1.9: SIMD & Vectorization
+
+| Task | Description | Target |
+|------|-------------|--------|
+| Explicit SIMD types | `v128`, `v256` | Portable SIMD |
+| SIMD intrinsics | Platform-specific ops | AVX2, NEON |
+| Auto-vectorization hints | Contract-driven | LLVM vectorizer |
+| Parallel iteration | Proven independence | OpenMP-style |
+
+**SIMD Examples**:
+```bmb
+@node dot_product
+@params a:[f32; N] b:[f32; N]
+@returns f32
+@pre N % 8 == 0           # Enables AVX vectorization
+@pre aligned(a, 32)       # 32-byte aligned for AVX
+@pre aligned(b, 32)
+@pure
+
+  # Compiler auto-vectorizes with AVX2
+  # Contract proves safety of 8-wide operations
+```
+
+#### v2.0: Transcendence Complete
+
+| Capability | C | Rust | BMB |
+|------------|---|------|-----|
+| Bounds check elimination | Manual | Partial | **Proven** |
+| Alias analysis | Limited | Borrow checker | **SMT proven** |
+| Null safety | None | Option | **Contract proven** |
+| Vectorization hints | Manual | Limited | **Auto from contracts** |
+| Dead code elimination | Limited | Good | **Proof-based** |
+| Loop optimization | Manual hints | Some | **Invariant-proven** |
+
+**Transcendence Mechanism**:
+```
+C:    Compiler assumes worst case → conservative optimization
+Rust: Type system provides some guarantees → better optimization
+BMB:  Contracts PROVE properties → OPTIMAL optimization
+
+Example: Array access
+  C:    Must check bounds (or undefined behavior)
+  Rust: Borrow checker helps, but not all cases
+  BMB:  @pre proves bounds → NO check, FULL vectorization
+```
+
+**Success Criteria**:
+- Benchmark suite shows BMB ≥ C performance
+- Proof-guided optimization documented and reproducible
+- Philosophy maintained: "Omission is guessing, and guessing is error"
+
+---
+
+## Research-Backed Optimization Summary
+
+| Technique | Source | BMB Integration | Expected Gain |
+|-----------|--------|-----------------|---------------|
+| Region memory | Cyclone, MLKit | @region, escape analysis | 10-20% allocation |
+| Liquid types | LiquidHaskell | Type refinements | 15-30% bounds checks |
+| PGO | LLVM | --pgo-gen/--pgo-use | 5-30% overall |
+| LLVM metadata | LLVM docs | Contract → metadata | 10-30% optimization |
+| Escape analysis | Go, Java JVM | @no_escape | Stack allocation |
+| Alive2 | Research | Optimization verification | Correctness |
+| Comptime | Zig | @comptime, @pure | Compile-time eval |
+
+---
+
+## Future Directions (Post-v2.0)
 
 | Feature | Description | Priority |
 |---------|-------------|----------|
-| Effect system | Track and verify side effects | High |
-| Refinement types | `x:i32 where x > 0` | High |
-| Dependent types (limited) | Type-level computation | Medium |
-| GPU/SIMD targets | Parallel computation | Medium |
-| Incremental compilation | Faster rebuilds | High |
+| GPU/Compute targets | CUDA, OpenCL codegen | Medium |
 | Formal semantics | Coq/Lean formalization | Low |
+| Incremental compilation | Faster rebuilds | High |
+| Distributed verification | Parallel SMT solving | Medium |
+| AI-assisted contracts | Contract suggestion | Low |
 
 ---
 
@@ -373,6 +699,7 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 5.0 | 2025-12-23 | Post-v1.0 Performance Transcendence Roadmap (Bronze/Silver/Gold stages, LLVM at v1.4+, research-backed optimizations) |
 | 4.0 | 2025-12-23 | Extended roadmap v0.7-v0.15, realistic phases |
 | 3.0 | 2025-12-22 | v0.4.0 current status |
 | 2.0 | 2025-12-21 | Initial v0.2.0 roadmap |
