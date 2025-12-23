@@ -1,5 +1,9 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.5
+// Version 0.6
+//
+// Changes in 0.6:
+//   - Added bitwise opcodes: and, or, xor, shl, shr, not
+//   - Added @contract named contract definitions
 //
 // Changes in 0.5:
 //   - Added @variant|@% (termination proof)
@@ -155,6 +159,7 @@ stmt = { opcode ~ operand* }
 // Opcodes - must be checked before ident in operand
 opcode = @{
     ("add" | "sub" | "mul" | "div" | "mod" |
+     "and" | "or" | "xor" | "shl" | "shr" | "not" |
      "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
      "ret" | "jmp" | "jif" | "call" | "xcall" |
      "mov" | "load" | "store" | "print") ~ !ASCII_ALPHANUMERIC
@@ -251,6 +256,7 @@ bool_literal = { "true" | "false" }
 // Reserved keywords (opcodes and boolean literals)
 reserved = @{
     ("add" | "sub" | "mul" | "div" | "mod" |
+     "and" | "or" | "xor" | "shl" | "shr" | "not" |
      "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
      "ret" | "jmp" | "jif" | "call" | "xcall" |
      "mov" | "load" | "store" | "print" |

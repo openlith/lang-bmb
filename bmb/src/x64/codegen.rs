@@ -645,6 +645,12 @@ impl X64Codegen {
             Opcode::Jif => self.compile_jif(stmt),
             Opcode::Call => self.compile_call(stmt),
             Opcode::Xcall => self.compile_xcall(stmt),
+            Opcode::And => self.compile_binary_op(stmt, BinaryOp::And),
+            Opcode::Or => self.compile_binary_op(stmt, BinaryOp::Or),
+            Opcode::Xor => self.compile_binary_op(stmt, BinaryOp::Xor),
+            Opcode::Shl => self.compile_binary_op(stmt, BinaryOp::Shl),
+            Opcode::Shr => self.compile_binary_op(stmt, BinaryOp::Shr),
+            Opcode::Not => self.compile_not(stmt),
             Opcode::Load | Opcode::Store => Err(BmbError::CodegenError {
                 message: "Memory operations not yet implemented".to_string(),
             }),
@@ -696,6 +702,19 @@ impl X64Codegen {
             BinaryOp::Add => self.code.add_r64_r64(dst_reg, src2),
             BinaryOp::Sub => self.code.sub_r64_r64(dst_reg, src2),
             BinaryOp::Mul => self.code.imul_r64_r64(dst_reg, src2),
+            BinaryOp::And => self.code.and_r64_r64(dst_reg, src2),
+            BinaryOp::Or => self.code.or_r64_r64(dst_reg, src2),
+            BinaryOp::Xor => self.code.xor_r64_r64(dst_reg, src2),
+            BinaryOp::Shl => {
+                // SHL uses CL for shift count - move src2 to RCX
+                self.code.mov_r64_r64(Reg64::RCX, src2);
+                self.code.shl_r64_cl(dst_reg);
+            }
+            BinaryOp::Shr => {
+                // SAR uses CL for shift count - move src2 to RCX
+                self.code.mov_r64_r64(Reg64::RCX, src2);
+                self.code.sar_r64_cl(dst_reg);
+            }
         }
         Ok(())
     }
@@ -767,6 +786,30 @@ impl X64Codegen {
         if dst_reg != Reg64::RDX {
             self.code.mov_r64_r64(dst_reg, Reg64::RDX);
         }
+        Ok(())
+    }
+
+    fn compile_not(&mut self, stmt: &Statement) -> Result<(), BmbError> {
+        let dst_name = match &stmt.operands[0] {
+            Operand::Register(v) => v.name.trim_start_matches('%').to_string(),
+            _ => {
+                return Err(BmbError::CodegenError {
+                    message: "NOT destination must be register".to_string(),
+                })
+            }
+        };
+
+        let dst_reg = self.alloc_reg(&dst_name)?;
+
+        // Load operand
+        let src = self.operand_to_reg(&stmt.operands[1], Some(dst_reg))?;
+        if src != dst_reg {
+            self.code.mov_r64_r64(dst_reg, src);
+        }
+
+        // Apply bitwise NOT
+        self.code.not_r64(dst_reg);
+
         Ok(())
     }
 
@@ -1052,6 +1095,12 @@ enum BinaryOp {
     Add,
     Sub,
     Mul,
+    // Bitwise operations
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
 }
 
 #[derive(Debug, Clone, Copy)]

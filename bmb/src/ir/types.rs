@@ -106,14 +106,19 @@ pub enum IrBinOp {
     Mul,
     Div,
     Mod,
+    // Bitwise operations
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    // Comparisons
     Eq,
     Ne,
     Lt,
     Le,
     Gt,
     Ge,
-    And,
-    Or,
 }
 
 impl std::fmt::Display for IrBinOp {
@@ -124,14 +129,17 @@ impl std::fmt::Display for IrBinOp {
             IrBinOp::Mul => write!(f, "mul"),
             IrBinOp::Div => write!(f, "div"),
             IrBinOp::Mod => write!(f, "mod"),
+            IrBinOp::And => write!(f, "and"),
+            IrBinOp::Or => write!(f, "or"),
+            IrBinOp::Xor => write!(f, "xor"),
+            IrBinOp::Shl => write!(f, "shl"),
+            IrBinOp::Shr => write!(f, "shr"),
             IrBinOp::Eq => write!(f, "eq"),
             IrBinOp::Ne => write!(f, "ne"),
             IrBinOp::Lt => write!(f, "lt"),
             IrBinOp::Le => write!(f, "le"),
             IrBinOp::Gt => write!(f, "gt"),
             IrBinOp::Ge => write!(f, "ge"),
-            IrBinOp::And => write!(f, "and"),
-            IrBinOp::Or => write!(f, "or"),
         }
     }
 }

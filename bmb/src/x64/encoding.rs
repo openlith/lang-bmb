@@ -471,6 +471,8 @@ impl CodeBuffer {
         self.emit(0x05);
     }
 
+    // ==================== Bitwise Operations ====================
+
     /// XOR r64, r64 (often used to zero a register)
     pub fn xor_r64_r64(&mut self, dst: Reg64, src: Reg64) {
         let mut rex = Rex::new().w();
@@ -483,6 +485,67 @@ impl CodeBuffer {
         self.emit(rex.encode());
         self.emit(0x31); // 31 /r
         self.emit(ModRM::reg_reg(src.encoding(), dst.encoding()).encode());
+    }
+
+    /// AND r64, r64
+    pub fn and_r64_r64(&mut self, dst: Reg64, src: Reg64) {
+        let mut rex = Rex::new().w();
+        if src.needs_rex_ext() {
+            rex = rex.r();
+        }
+        if dst.needs_rex_ext() {
+            rex = rex.b();
+        }
+        self.emit(rex.encode());
+        self.emit(0x21); // 21 /r
+        self.emit(ModRM::reg_reg(src.encoding(), dst.encoding()).encode());
+    }
+
+    /// OR r64, r64
+    pub fn or_r64_r64(&mut self, dst: Reg64, src: Reg64) {
+        let mut rex = Rex::new().w();
+        if src.needs_rex_ext() {
+            rex = rex.r();
+        }
+        if dst.needs_rex_ext() {
+            rex = rex.b();
+        }
+        self.emit(rex.encode());
+        self.emit(0x09); // 09 /r
+        self.emit(ModRM::reg_reg(src.encoding(), dst.encoding()).encode());
+    }
+
+    /// SHL r64, CL (shift left by value in CL register)
+    pub fn shl_r64_cl(&mut self, dst: Reg64) {
+        let mut rex = Rex::new().w();
+        if dst.needs_rex_ext() {
+            rex = rex.b();
+        }
+        self.emit(rex.encode());
+        self.emit(0xD3); // D3 /4
+        self.emit(ModRM::reg_reg(4, dst.encoding()).encode()); // /4 for SHL
+    }
+
+    /// SAR r64, CL (arithmetic shift right by value in CL register)
+    pub fn sar_r64_cl(&mut self, dst: Reg64) {
+        let mut rex = Rex::new().w();
+        if dst.needs_rex_ext() {
+            rex = rex.b();
+        }
+        self.emit(rex.encode());
+        self.emit(0xD3); // D3 /7
+        self.emit(ModRM::reg_reg(7, dst.encoding()).encode()); // /7 for SAR
+    }
+
+    /// NOT r64 (bitwise NOT, one's complement)
+    pub fn not_r64(&mut self, dst: Reg64) {
+        let mut rex = Rex::new().w();
+        if dst.needs_rex_ext() {
+            rex = rex.b();
+        }
+        self.emit(rex.encode());
+        self.emit(0xF7); // F7 /2
+        self.emit(ModRM::reg_reg(2, dst.encoding()).encode()); // /2 for NOT
     }
 }
 

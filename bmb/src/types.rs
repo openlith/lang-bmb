@@ -402,6 +402,77 @@ fn typecheck_statement(
             }
         }
 
+        Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Shl | Opcode::Shr => {
+            // Bitwise binary: %dest = op %a %b
+            // Operands must be same integer type, result is same type
+            if stmt.operands.len() != 3 {
+                return Err(BmbError::TypeError {
+                    message: format!(
+                        "{} requires 3 operands, got {}",
+                        stmt.opcode,
+                        stmt.operands.len()
+                    ),
+                });
+            }
+
+            let (type_a, type_b) =
+                get_operand_types(&stmt.operands[1], &stmt.operands[2], env, registry)?;
+
+            if type_a != type_b {
+                return Err(BmbError::TypeError {
+                    message: format!(
+                        "{} operands must have same type: {} vs {}",
+                        stmt.opcode, type_a, type_b
+                    ),
+                });
+            }
+
+            // Bitwise operations only work on integer types
+            if !type_a.is_integer() && type_a != Type::Bool {
+                return Err(BmbError::TypeError {
+                    message: format!(
+                        "{} requires integer operands, got {}",
+                        stmt.opcode, type_a
+                    ),
+                });
+            }
+
+            // Set result register type (same as operands)
+            if let Operand::Register(ref r) = stmt.operands[0] {
+                env.add_register(&r.name, type_a);
+            }
+        }
+
+        Opcode::Not => {
+            // Bitwise NOT: %dest = not %a
+            // Unary operation, result is same integer type
+            if stmt.operands.len() != 2 {
+                return Err(BmbError::TypeError {
+                    message: format!(
+                        "not requires 2 operands, got {}",
+                        stmt.operands.len()
+                    ),
+                });
+            }
+
+            let operand_type = get_operand_type(&stmt.operands[1], env, registry)?;
+
+            // Bitwise NOT only works on integer types
+            if !operand_type.is_integer() && operand_type != Type::Bool {
+                return Err(BmbError::TypeError {
+                    message: format!(
+                        "not requires integer operand, got {}",
+                        operand_type
+                    ),
+                });
+            }
+
+            // Set result register type (same as operand)
+            if let Operand::Register(ref r) = stmt.operands[0] {
+                env.add_register(&r.name, operand_type);
+            }
+        }
+
         Opcode::Eq | Opcode::Ne | Opcode::Lt | Opcode::Le | Opcode::Gt | Opcode::Ge => {
             // Comparison: %dest = op %a %b
             // Operands must be same type, result is bool

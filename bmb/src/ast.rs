@@ -287,6 +287,20 @@ pub enum Opcode {
     Div,
     Mod,
 
+    // Bitwise operations
+    /// Bitwise AND: and %r a b → a & b
+    And,
+    /// Bitwise OR: or %r a b → a | b
+    Or,
+    /// Bitwise XOR: xor %r a b → a ^ b
+    Xor,
+    /// Shift left: shl %r a n → a << n
+    Shl,
+    /// Shift right: shr %r a n → a >> n
+    Shr,
+    /// Bitwise NOT: not %r a → ~a
+    Not,
+
     // Comparison
     Eq,
     Ne,
@@ -321,6 +335,12 @@ impl fmt::Display for Opcode {
             Opcode::Mul => write!(f, "mul"),
             Opcode::Div => write!(f, "div"),
             Opcode::Mod => write!(f, "mod"),
+            Opcode::And => write!(f, "and"),
+            Opcode::Or => write!(f, "or"),
+            Opcode::Xor => write!(f, "xor"),
+            Opcode::Shl => write!(f, "shl"),
+            Opcode::Shr => write!(f, "shr"),
+            Opcode::Not => write!(f, "not"),
             Opcode::Eq => write!(f, "eq"),
             Opcode::Ne => write!(f, "ne"),
             Opcode::Lt => write!(f, "lt"),

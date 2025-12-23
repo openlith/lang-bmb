@@ -409,6 +409,12 @@ impl CodeGenerator {
             Opcode::Mul => self.generate_binary_op(stmt, func, ctx, BinaryOp::Mul)?,
             Opcode::Div => self.generate_binary_op(stmt, func, ctx, BinaryOp::Div)?,
             Opcode::Mod => self.generate_binary_op(stmt, func, ctx, BinaryOp::Mod)?,
+            Opcode::And => self.generate_binary_op(stmt, func, ctx, BinaryOp::And)?,
+            Opcode::Or => self.generate_binary_op(stmt, func, ctx, BinaryOp::Or)?,
+            Opcode::Xor => self.generate_binary_op(stmt, func, ctx, BinaryOp::Xor)?,
+            Opcode::Shl => self.generate_binary_op(stmt, func, ctx, BinaryOp::Shl)?,
+            Opcode::Shr => self.generate_binary_op(stmt, func, ctx, BinaryOp::Shr)?,
+            Opcode::Not => self.generate_unary_not(stmt, func, ctx)?,
             Opcode::Eq => self.generate_binary_op(stmt, func, ctx, BinaryOp::Eq)?,
             Opcode::Ne => self.generate_binary_op(stmt, func, ctx, BinaryOp::Ne)?,
             Opcode::Lt => self.generate_binary_op(stmt, func, ctx, BinaryOp::Lt)?,
@@ -696,6 +702,57 @@ impl CodeGenerator {
                 }
                 _ => Instruction::I32RemS,
             },
+            // Bitwise operations (integer only)
+            BinaryOp::And => match dest_type {
+                Type::I32 | Type::Bool => Instruction::I32And,
+                Type::I64 => Instruction::I64And,
+                Type::F32 | Type::F64 => {
+                    return Err(BmbError::CodegenError {
+                        message: "Bitwise AND not supported for floating point types".to_string(),
+                    })
+                }
+                _ => Instruction::I32And,
+            },
+            BinaryOp::Or => match dest_type {
+                Type::I32 | Type::Bool => Instruction::I32Or,
+                Type::I64 => Instruction::I64Or,
+                Type::F32 | Type::F64 => {
+                    return Err(BmbError::CodegenError {
+                        message: "Bitwise OR not supported for floating point types".to_string(),
+                    })
+                }
+                _ => Instruction::I32Or,
+            },
+            BinaryOp::Xor => match dest_type {
+                Type::I32 | Type::Bool => Instruction::I32Xor,
+                Type::I64 => Instruction::I64Xor,
+                Type::F32 | Type::F64 => {
+                    return Err(BmbError::CodegenError {
+                        message: "Bitwise XOR not supported for floating point types".to_string(),
+                    })
+                }
+                _ => Instruction::I32Xor,
+            },
+            BinaryOp::Shl => match dest_type {
+                Type::I32 | Type::Bool => Instruction::I32Shl,
+                Type::I64 => Instruction::I64Shl,
+                Type::F32 | Type::F64 => {
+                    return Err(BmbError::CodegenError {
+                        message: "Shift left not supported for floating point types".to_string(),
+                    })
+                }
+                _ => Instruction::I32Shl,
+            },
+            BinaryOp::Shr => match dest_type {
+                Type::I32 | Type::Bool => Instruction::I32ShrS, // Signed shift right
+                Type::I64 => Instruction::I64ShrS,
+                Type::F32 | Type::F64 => {
+                    return Err(BmbError::CodegenError {
+                        message: "Shift right not supported for floating point types".to_string(),
+                    })
+                }
+                _ => Instruction::I32ShrS,
+            },
             // Comparisons return i32 (bool)
             BinaryOp::Eq => match dest_type {
                 Type::I32 | Type::Bool => Instruction::I32Eq,
@@ -742,6 +799,58 @@ impl CodeGenerator {
         };
 
         func.instruction(&instr);
+
+        // Store result
+        if let Operand::Register(r) = &stmt.operands[0] {
+            if let Some(&idx) = ctx.locals.get(&r.name) {
+                func.instruction(&Instruction::LocalSet(idx));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Generate unary NOT operation: not %r a → ~a
+    /// Implemented as XOR with -1 (all bits set)
+    fn generate_unary_not(
+        &self,
+        stmt: &Statement,
+        func: &mut Function,
+        ctx: &FunctionContext,
+    ) -> Result<()> {
+        // Determine type from destination register
+        let dest_type = if let Operand::Register(r) = &stmt.operands[0] {
+            ctx.register_types
+                .get(&r.name)
+                .cloned()
+                .unwrap_or(Type::I32)
+        } else {
+            Type::I32
+        };
+
+        // Load operand
+        self.generate_operand(&stmt.operands[1], func, ctx)?;
+
+        // Apply NOT using XOR with -1 (all bits set)
+        match dest_type {
+            Type::I32 | Type::Bool => {
+                func.instruction(&Instruction::I32Const(-1));
+                func.instruction(&Instruction::I32Xor);
+            }
+            Type::I64 => {
+                func.instruction(&Instruction::I64Const(-1));
+                func.instruction(&Instruction::I64Xor);
+            }
+            Type::F32 | Type::F64 => {
+                return Err(BmbError::CodegenError {
+                    message: "Bitwise NOT not supported for floating point types".to_string(),
+                });
+            }
+            _ => {
+                func.instruction(&Instruction::I32Const(-1));
+                func.instruction(&Instruction::I32Xor);
+            }
+        }
 
         // Store result
         if let Operand::Register(r) = &stmt.operands[0] {
@@ -879,6 +988,13 @@ enum BinaryOp {
     Mul,
     Div,
     Mod,
+    // Bitwise operations
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    // Comparisons
     Eq,
     Ne,
     Lt,

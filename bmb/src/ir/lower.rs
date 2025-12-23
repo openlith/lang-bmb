@@ -174,6 +174,44 @@ impl IrLowerer {
                 }
             }
 
+            // Bitwise operations
+            Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Shl | Opcode::Shr => {
+                // and %dest %left %right
+                let ir_op = match &stmt.opcode {
+                    Opcode::And => IrBinOp::And,
+                    Opcode::Or => IrBinOp::Or,
+                    Opcode::Xor => IrBinOp::Xor,
+                    Opcode::Shl => IrBinOp::Shl,
+                    Opcode::Shr => IrBinOp::Shr,
+                    _ => unreachable!(),
+                };
+
+                let dest = self.extract_dest(stmt);
+                if stmt.operands.len() >= 3 {
+                    let left = self.lower_operand(&stmt.operands[1], body);
+                    let right = self.lower_operand(&stmt.operands[2], body);
+                    body.push(IrInst::BinOp {
+                        dest,
+                        op: ir_op,
+                        left,
+                        right,
+                    });
+                }
+            }
+
+            Opcode::Not => {
+                // not %dest %value - unary bitwise NOT
+                let dest = self.extract_dest(stmt);
+                if stmt.operands.len() >= 2 {
+                    let operand = self.lower_operand(&stmt.operands[1], body);
+                    body.push(IrInst::UnaryOp {
+                        dest,
+                        op: IrUnaryOp::Not,
+                        operand,
+                    });
+                }
+            }
+
             Opcode::Eq | Opcode::Ne | Opcode::Lt | Opcode::Le | Opcode::Gt | Opcode::Ge => {
                 // eq %dest %left %right
                 let ir_op = match &stmt.opcode {
