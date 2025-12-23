@@ -427,6 +427,13 @@ fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
                 Ok(())
             }
         }
+        // Generic built-in types
+        Type::Option(inner) => validate_type(inner, registry),
+        Type::Result { ok, err } => {
+            validate_type(ok, registry)?;
+            validate_type(err, registry)
+        }
+        Type::Vector(inner) | Type::Slice(inner) => validate_type(inner, registry),
     }
 }
 

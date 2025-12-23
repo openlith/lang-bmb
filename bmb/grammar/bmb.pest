@@ -3,6 +3,7 @@
 //
 // Changes in 0.8:
 //   - Added @type refined type definitions with constraints
+//   - Added Option<T> and Result<T,E> generic types
 //   - Signal Density Optimization: explicit constraints in type names
 //
 // Changes in 0.6:
@@ -222,8 +223,12 @@ hex_escape = { "x" ~ ASCII_HEX_DIGIT{2} }
 unicode_escape = { "u" ~ "{" ~ ASCII_HEX_DIGIT{1,6} ~ "}" }
 
 // Types
-// type_spec is the main type rule (supports arrays, references, pointers, user types)
-type_spec = { array_type | ref_type | ptr_type | primitive_type | user_type }
+// type_spec is the main type rule (supports arrays, references, pointers, generics, user types)
+type_spec = { array_type | ref_type | ptr_type | generic_type | primitive_type | user_type }
+
+// Generic types: Option<T>, Result<T,E>, Vector<T>, etc.
+generic_type = { generic_name ~ "<" ~ type_spec ~ ("," ~ type_spec)* ~ ">" }
+generic_name = @{ ("Option" | "Result" | "Vector" | "Slice") ~ !ASCII_ALPHANUMERIC }
 
 // Primitive types
 // Signed: i8, i16, i32, i64

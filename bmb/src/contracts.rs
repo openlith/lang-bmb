@@ -740,7 +740,11 @@ pub fn type_to_valtype(ty: &Type) -> ValType {
         | Type::Enum(_)
         | Type::Ref(_)
         | Type::Ptr(_)
-        | Type::Refined { .. } => ValType::I32,
+        | Type::Refined { .. }
+        | Type::Option(_)
+        | Type::Result { .. }
+        | Type::Vector(_)
+        | Type::Slice(_) => ValType::I32,
     }
 }
 

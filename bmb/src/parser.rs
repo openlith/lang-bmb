@@ -633,6 +633,76 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type> {
             let inner_type = parse_type(pair.into_inner().next().unwrap())?;
             Ok(Type::Ptr(Box::new(inner_type)))
         }
+        Rule::generic_type => {
+            // generic_type = { generic_name ~ "<" ~ type_spec ~ ("," ~ type_spec)* ~ ">" }
+            let mut inner = pair.into_inner();
+            let generic_name = inner.next().unwrap().as_str();
+            let type_args: Vec<Type> = inner.map(|p| parse_type(p)).collect::<Result<Vec<_>>>()?;
+
+            match generic_name {
+                "Option" => {
+                    if type_args.len() != 1 {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!(
+                                "Option requires exactly 1 type argument, got {}",
+                                type_args.len()
+                            ),
+                        });
+                    }
+                    Ok(Type::Option(Box::new(type_args.into_iter().next().unwrap())))
+                }
+                "Result" => {
+                    if type_args.len() != 2 {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!(
+                                "Result requires exactly 2 type arguments, got {}",
+                                type_args.len()
+                            ),
+                        });
+                    }
+                    let mut iter = type_args.into_iter();
+                    Ok(Type::Result {
+                        ok: Box::new(iter.next().unwrap()),
+                        err: Box::new(iter.next().unwrap()),
+                    })
+                }
+                "Vector" => {
+                    if type_args.len() != 1 {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!(
+                                "Vector requires exactly 1 type argument, got {}",
+                                type_args.len()
+                            ),
+                        });
+                    }
+                    Ok(Type::Vector(Box::new(type_args.into_iter().next().unwrap())))
+                }
+                "Slice" => {
+                    if type_args.len() != 1 {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!(
+                                "Slice requires exactly 1 type argument, got {}",
+                                type_args.len()
+                            ),
+                        });
+                    }
+                    Ok(Type::Slice(Box::new(type_args.into_iter().next().unwrap())))
+                }
+                _ => Err(BmbError::ParseError {
+                    line: 0,
+                    column: 0,
+                    message: format!("Unknown generic type: {}", generic_name),
+                }),
+            }
+        }
         Rule::user_type => {
             // User-defined type (struct or enum name)
             // We'll resolve whether it's a struct or enum during type checking
@@ -2026,5 +2096,137 @@ _base:
             },
             other => panic!("Expected Binary expression, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_parse_option_type() {
+        // Function with Option<i32> parameter
+        let source = r#"
+@node maybe_double
+@params x:Option<i32>
+@returns Option<i32>
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Option type should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        let param_type = &program.nodes[0].params[0].ty;
+        assert!(
+            matches!(param_type, Type::Option(inner) if matches!(&**inner, Type::I32)),
+            "Expected Option<i32>, got {:?}",
+            param_type
+        );
+    }
+
+    #[test]
+    fn test_parse_result_type() {
+        // Function with Result<i32, i32> return type
+        let source = r#"
+@node divide
+@params a:i32 b:i32
+@returns Result<i32, i32>
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Result type should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        let ret_type = &program.nodes[0].returns;
+        assert!(
+            matches!(ret_type, Type::Result { ok, err } if matches!(&**ok, Type::I32) && matches!(&**err, Type::I32)),
+            "Expected Result<i32, i32>, got {:?}",
+            ret_type
+        );
+    }
+
+    #[test]
+    fn test_parse_nested_generic_types() {
+        // Nested generic types: Option<Result<i32, bool>>
+        let source = r#"
+@node complex
+@params
+@returns Option<Result<i32, bool>>
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Nested generic types should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        let ret_type = &program.nodes[0].returns;
+        match ret_type {
+            Type::Option(inner) => match &**inner {
+                Type::Result { ok, err } => {
+                    assert!(matches!(&**ok, Type::I32));
+                    assert!(matches!(&**err, Type::Bool));
+                }
+                other => panic!("Expected Result inside Option, got {:?}", other),
+            },
+            other => panic!("Expected Option, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_type() {
+        // Vector<f64> parameter
+        let source = r#"
+@node sum_vector
+@params v:Vector<f64>
+@returns f64
+
+  ret 0.0
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Vector type should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        let param_type = &program.nodes[0].params[0].ty;
+        assert!(
+            matches!(param_type, Type::Vector(inner) if matches!(&**inner, Type::F64)),
+            "Expected Vector<f64>, got {:?}",
+            param_type
+        );
+    }
+
+    #[test]
+    fn test_parse_slice_type() {
+        // Slice<i32> parameter
+        let source = r#"
+@node process_slice
+@params s:Slice<i32>
+@returns i32
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "Slice type should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        let param_type = &program.nodes[0].params[0].ty;
+        assert!(
+            matches!(param_type, Type::Slice(inner) if matches!(&**inner, Type::I32)),
+            "Expected Slice<i32>, got {:?}",
+            param_type
+        );
     }
 }

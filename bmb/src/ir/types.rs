@@ -112,6 +112,9 @@ impl From<&Type> for IrType {
             // Refined types use their base type's IR representation
             // (resolved during type checking)
             Type::Refined { .. } => IrType::I32,
+
+            // Generic built-in types - represented as i32 pointers in WASM32
+            Type::Option(_) | Type::Result { .. } | Type::Vector(_) | Type::Slice(_) => IrType::I32,
         }
     }
 }

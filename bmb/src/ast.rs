@@ -264,6 +264,19 @@ pub enum Type {
         /// Type arguments for parameterized refined types (e.g., [N] values as strings)
         args: Vec<String>,
     },
+
+    // Generic built-in types (v0.8+)
+    /// Option type: Option<T> - represents optional value (Some(T) or None)
+    Option(Box<Type>),
+    /// Result type: Result<T, E> - represents success or error
+    Result {
+        ok: Box<Type>,
+        err: Box<Type>,
+    },
+    /// Vector type: Vector<T> - dynamic array (placeholder for Phase 4)
+    Vector(Box<Type>),
+    /// Slice type: Slice<T> - borrowed view into array/vector (placeholder for Phase 4)
+    Slice(Box<Type>),
 }
 
 impl Type {
@@ -372,6 +385,10 @@ impl fmt::Display for Type {
                     write!(f, "{}[{}]", name, args.join(", "))
                 }
             }
+            Type::Option(inner) => write!(f, "Option<{}>", inner),
+            Type::Result { ok, err } => write!(f, "Result<{}, {}>", ok, err),
+            Type::Vector(inner) => write!(f, "Vector<{}>", inner),
+            Type::Slice(inner) => write!(f, "Slice<{}>", inner),
         }
     }
 }

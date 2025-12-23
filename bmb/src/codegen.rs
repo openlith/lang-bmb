@@ -95,6 +95,25 @@ fn type_size_align(ty: &Type) -> (u32, u32) {
         Type::Struct(_) | Type::Enum(_) => (4, 4), // Placeholder - actual size from registry
         // Refined types use their base type's size (resolved at type check time)
         Type::Refined { .. } => (4, 4), // Placeholder - actual size from type registry
+        // Generic built-in types (v0.8+)
+        Type::Option(inner) => {
+            // Option<T> = tag (i32) + value (T), aligned to max alignment
+            let (inner_size, inner_align) = type_size_align(inner);
+            let align = inner_align.max(4);
+            let size = 4 + inner_size; // tag + value
+            (size, align)
+        }
+        Type::Result { ok, err } => {
+            // Result<T,E> = tag (i32) + max(T, E), aligned to max alignment
+            let (ok_size, ok_align) = type_size_align(ok);
+            let (err_size, err_align) = type_size_align(err);
+            let inner_size = ok_size.max(err_size);
+            let align = ok_align.max(err_align).max(4);
+            (4 + inner_size, align) // tag + max(ok, err)
+        }
+        // Vector and Slice are represented as pointers in WASM32
+        Type::Vector(_) => (4, 4), // Pointer to heap allocation
+        Type::Slice(_) => (8, 4),  // Pointer + length (fat pointer)
     }
 }
 
@@ -1265,6 +1284,11 @@ fn type_to_valtype(ty: &Type) -> ValType {
         Type::Ref(_) => ValType::I32,       // Reference pointer
         Type::Ptr(_) => ValType::I32,       // Raw pointer
         Type::Refined { .. } => ValType::I32, // Refined type (resolved to base type at check time)
+        // Generic built-in types - represented as i32 pointers in WASM32
+        Type::Option(_) => ValType::I32,    // Option tag+value (stack allocated for small types)
+        Type::Result { .. } => ValType::I32, // Result tag+value (stack allocated for small types)
+        Type::Vector(_) => ValType::I32,    // Vector pointer to heap
+        Type::Slice(_) => ValType::I32,     // Slice pointer (fat pointer, but simplified for now)
     }
 }
 
