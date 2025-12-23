@@ -213,6 +213,9 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
     let mut preconditions = Vec::new();
     let mut postconditions = Vec::new();
     let mut invariants = Vec::new();
+    let mut variants = Vec::new();
+    let mut pure = false;
+    let mut requires = Vec::new();
     let mut assertions = Vec::new();
     let mut tests = Vec::new();
     let mut body = Vec::new();
@@ -293,6 +296,9 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
         preconditions,
         postconditions,
         invariants,
+        variants,
+        pure,
+        requires,
         assertions,
         tests,
         body,

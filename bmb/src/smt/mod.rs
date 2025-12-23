@@ -965,6 +965,9 @@ mod tests {
                 }],
                 postconditions: vec![Expr::BoolLit(true)],
                 invariants: vec![],
+                variants: vec![],
+                pure: false,
+                requires: vec![],
                 assertions: vec![],
                 tests: vec![],
                 body: vec![],
@@ -1017,6 +1020,9 @@ mod tests {
                 }],
                 postconditions: vec![],
                 invariants: vec![],
+                variants: vec![],
+                pure: false,
+                requires: vec![],
                 assertions: vec![
                     Assert {
                         condition: Expr::Binary {
