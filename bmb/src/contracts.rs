@@ -4,11 +4,25 @@
 //!
 //! "Omission is guessing, and guessing is error."
 //! - Contracts make implicit assumptions explicit and verifiable.
+//!
+//! ## Contract Chaining (@requires)
+//!
+//! Named contracts can be reused via @requires directives:
+//! ```bmb
+//! @contract positive(n:i32)
+//! @pre n > 0
+//!
+//! @node double
+//! @params x:i32
+//! @returns i32
+//! @requires positive(x)  # Expands to @pre x > 0
+//! ```
 
 use wasm_encoder::{BlockType, Function, Instruction, ValType};
 
-use crate::ast::{BinaryOp, Expr, Type, UnaryOp};
+use crate::ast::{BinaryOp, ContractDef, Expr, Node, Type, UnaryOp};
 use crate::types::TypedProgram;
+use crate::BmbError;
 use crate::Result;
 use std::collections::HashMap;
 
@@ -16,6 +30,117 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct VerifiedProgram {
     pub program: TypedProgram,
+}
+
+/// Expanded contracts from @requires directives
+#[derive(Debug, Clone, Default)]
+pub struct ExpandedContracts {
+    /// Additional preconditions from @requires
+    pub preconditions: Vec<Expr>,
+    /// Additional postconditions from @requires
+    pub postconditions: Vec<Expr>,
+}
+
+/// Expand @requires directives into their constituent contracts
+///
+/// This function looks up each @requires reference, substitutes the
+/// parameters with the provided arguments, and returns the expanded
+/// preconditions and postconditions.
+///
+/// # Example
+///
+/// ```text
+/// @contract positive(n:i32)
+/// @pre n > 0
+///
+/// @node double
+/// @requires positive(x)
+/// # Expands to: @pre x > 0
+/// ```
+pub fn expand_requires(
+    node: &Node,
+    contracts: &[ContractDef],
+) -> Result<ExpandedContracts> {
+    let mut expanded = ExpandedContracts::default();
+
+    for req in &node.requires {
+        // Find the contract definition by name
+        let contract_def = contracts
+            .iter()
+            .find(|c| c.name.name == req.contract.name)
+            .ok_or_else(|| {
+                BmbError::ContractError {
+                    message: format!(
+                        "Contract '{}' not found (referenced by @requires in '{}')",
+                        req.contract.name, node.name.name
+                    ),
+                }
+            })?;
+
+        // Validate argument count matches parameter count
+        if req.args.len() != contract_def.params.len() {
+            return Err(BmbError::ContractError {
+                message: format!(
+                    "Contract '{}' expects {} arguments, but {} were provided in '{}'",
+                    contract_def.name.name,
+                    contract_def.params.len(),
+                    req.args.len(),
+                    node.name.name
+                ),
+            });
+        }
+
+        // Build substitution map: param_name -> argument_expr
+        let substitution: HashMap<String, &Expr> = contract_def
+            .params
+            .iter()
+            .zip(req.args.iter())
+            .map(|(param, arg)| (param.name.name.clone(), arg))
+            .collect();
+
+        // Expand preconditions with substituted arguments
+        for pre in &contract_def.preconditions {
+            let expanded_pre = substitute_expr(pre, &substitution);
+            expanded.preconditions.push(expanded_pre);
+        }
+
+        // Expand postconditions with substituted arguments
+        for post in &contract_def.postconditions {
+            let expanded_post = substitute_expr(post, &substitution);
+            expanded.postconditions.push(expanded_post);
+        }
+    }
+
+    Ok(expanded)
+}
+
+/// Substitute variables in an expression according to the substitution map
+///
+/// This recursively traverses the expression tree and replaces any
+/// Var(name) with the corresponding expression from the substitution map.
+fn substitute_expr(expr: &Expr, substitution: &HashMap<String, &Expr>) -> Expr {
+    match expr {
+        Expr::Var(ident) => {
+            // If this variable is in the substitution map, replace it
+            if let Some(replacement) = substitution.get(&ident.name) {
+                (*replacement).clone()
+            } else {
+                expr.clone()
+            }
+        }
+        Expr::Binary { op, left, right } => Expr::Binary {
+            op: op.clone(),
+            left: Box::new(substitute_expr(left, substitution)),
+            right: Box::new(substitute_expr(right, substitution)),
+        },
+        Expr::Unary { op, operand } => Expr::Unary {
+            op: op.clone(),
+            operand: Box::new(substitute_expr(operand, substitution)),
+        },
+        Expr::Old(inner) => Expr::Old(Box::new(substitute_expr(inner, substitution))),
+        // Literals and Ret don't need substitution
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ret => expr.clone(),
+    }
 }
 
 /// Verify contracts in a type-checked program
@@ -44,14 +169,27 @@ pub fn verify(program: &TypedProgram) -> Result<VerifiedProgram> {
     for typed_node in &program.nodes {
         let node = &typed_node.node;
 
+        // Expand @requires directives into constituent contracts
+        let expanded = expand_requires(node, &program.contracts)?;
+
         // Validate precondition syntax (multiple allowed)
         for pre in &node.preconditions {
             validate_contract_expr(pre, "precondition", &node.name.name)?;
         }
 
+        // Validate expanded preconditions from @requires
+        for pre in &expanded.preconditions {
+            validate_contract_expr(pre, "precondition (from @requires)", &node.name.name)?;
+        }
+
         // Validate postcondition syntax (multiple allowed)
         for post in &node.postconditions {
             validate_contract_expr(post, "postcondition", &node.name.name)?;
+        }
+
+        // Validate expanded postconditions from @requires
+        for post in &expanded.postconditions {
+            validate_contract_expr(post, "postcondition (from @requires)", &node.name.name)?;
         }
 
         // Validate assertion syntax (multiple allowed)
@@ -505,6 +643,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![TypedNode {
                 node,
                 register_types: HashMap::new(),
@@ -631,6 +770,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![TypedNode {
                 node,
                 register_types: HashMap::new(),

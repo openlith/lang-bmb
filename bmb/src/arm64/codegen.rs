@@ -484,6 +484,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![TypedNode {
                 node,
                 register_types: HashMap::new(),
@@ -530,6 +531,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![TypedNode {
                 node,
                 register_types: HashMap::new(),

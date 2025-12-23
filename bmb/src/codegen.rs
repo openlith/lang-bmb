@@ -193,7 +193,7 @@ impl CodeGenerator {
 
         // Third pass: generate function bodies
         for typed_node in &program.nodes {
-            self.generate_function(typed_node)?;
+            self.generate_function(typed_node, &program.contracts)?;
         }
 
         Ok(())
@@ -224,7 +224,11 @@ impl CodeGenerator {
         Ok(type_idx)
     }
 
-    fn generate_function(&mut self, typed_node: &TypedNode) -> Result<()> {
+    fn generate_function(
+        &mut self,
+        typed_node: &TypedNode,
+        contracts: &[crate::ast::ContractDef],
+    ) -> Result<()> {
         let node = &typed_node.node;
 
         // Build locals map: parameters first, then registers
@@ -251,8 +255,13 @@ impl CodeGenerator {
             }
         }
 
+        // Expand @requires directives into constituent contracts
+        let expanded = crate::contracts::expand_requires(node, contracts)?;
+
         // Add a result local for postcondition checking if needed
-        let result_local = if !node.postconditions.is_empty() {
+        // Also needed for expanded postconditions from @requires
+        let result_local = if !node.postconditions.is_empty() || !expanded.postconditions.is_empty()
+        {
             let idx = param_count + local_types.len() as u32;
             local_types.push((1, type_to_valtype(&node.returns)));
             Some(idx)
@@ -280,12 +289,23 @@ impl CodeGenerator {
             contract_gen.generate_precondition(pre, &mut func);
         }
 
+        // Generate expanded preconditions from @requires
+        for pre in &expanded.preconditions {
+            let contract_gen =
+                ContractCodeGenerator::new(&locals, &all_types, node.returns.clone());
+            contract_gen.generate_precondition(pre, &mut func);
+        }
+
         // Generate assertion checks after preconditions (multiple allowed)
         for assertion in &node.assertions {
             let contract_gen =
                 ContractCodeGenerator::new(&locals, &all_types, node.returns.clone());
             contract_gen.generate_assertion(&assertion.condition, &mut func);
         }
+
+        // Combine postconditions from node and expanded @requires
+        let mut all_postconditions = node.postconditions.clone();
+        all_postconditions.extend(expanded.postconditions);
 
         // Create function context for code generation
         let ctx = FunctionContext {
@@ -298,7 +318,7 @@ impl CodeGenerator {
                 .collect(),
             return_type: node.returns.clone(),
             function_indices: &self.function_indices,
-            postconditions: node.postconditions.clone(),
+            postconditions: all_postconditions,
             all_types: all_types.clone(),
             result_local,
         };
@@ -1263,6 +1283,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![node],
             registry: crate::types::TypeRegistry::new(),
         };
@@ -1313,6 +1334,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![node],
             registry: crate::types::TypeRegistry::new(),
         };
@@ -1359,6 +1381,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![node],
             registry: crate::types::TypeRegistry::new(),
         };

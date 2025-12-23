@@ -1247,3 +1247,126 @@ fn test_execute_bitwise_i64() {
         .expect("call failed");
     assert_eq!(result, 0x0F000F000F000F00_u64 as i64);
 }
+
+#[test]
+fn test_requires_contract_expansion() {
+    // Test @requires contract chaining
+    // The @contract defines reusable preconditions
+    // @requires expands them into the function
+    let source = r#"
+# Define a reusable contract
+@contract positive(n:i32)
+@pre n > 0
+
+@node double
+@params x:i32
+@returns i32
+@requires positive(x)  # Expands to @pre x > 0
+
+  add %r x x
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let double = instance
+        .get_typed_func::<i32, i32>(&mut store, "double")
+        .expect("double function not found");
+
+    // Test: Valid input (x > 0)
+    let result = double.call(&mut store, 5).expect("call failed");
+    assert_eq!(result, 10);
+
+    // Test: Another valid input
+    let result = double.call(&mut store, 100).expect("call failed");
+    assert_eq!(result, 200);
+}
+
+#[test]
+fn test_requires_contract_violation_traps() {
+    // Test that @requires expanded preconditions trap on violation
+    let source = r#"
+@contract positive(n:i32)
+@pre n > 0
+
+@node double
+@params x:i32
+@returns i32
+@requires positive(x)
+
+  add %r x x
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let double = instance
+        .get_typed_func::<i32, i32>(&mut store, "double")
+        .expect("double function not found");
+
+    // Test: Invalid input (x = 0, violates x > 0)
+    let result = double.call(&mut store, 0);
+    assert!(
+        result.is_err(),
+        "Should trap when precondition is violated"
+    );
+
+    // Test: Invalid input (x = -5, violates x > 0)
+    let result = double.call(&mut store, -5);
+    assert!(
+        result.is_err(),
+        "Should trap when precondition is violated"
+    );
+}
+
+#[test]
+fn test_requires_multiple_contracts() {
+    // Test @requires with multiple contracts and multiple parameters
+    let source = r#"
+@contract bounded(n:i32, max:i32)
+@pre n > 0
+@pre n < max
+
+@node safe_add
+@params a:i32 b:i32
+@returns i32
+@requires bounded(a, 100)
+@requires bounded(b, 100)
+
+  add %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let safe_add = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "safe_add")
+        .expect("safe_add function not found");
+
+    // Test: Valid inputs (both a, b > 0 and < 100)
+    let result = safe_add.call(&mut store, (10, 20)).expect("call failed");
+    assert_eq!(result, 30);
+
+    // Test: Invalid input (a = 0, violates a > 0)
+    let result = safe_add.call(&mut store, (0, 50));
+    assert!(result.is_err(), "Should trap when a <= 0");
+
+    // Test: Invalid input (a = 100, violates a < 100)
+    let result = safe_add.call(&mut store, (100, 50));
+    assert!(result.is_err(), "Should trap when a >= 100");
+}

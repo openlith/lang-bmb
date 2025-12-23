@@ -520,6 +520,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![make_typed_node(node)],
             registry: TypeRegistry::new(),
         };
@@ -571,6 +572,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![make_typed_node(node)],
             registry: TypeRegistry::new(),
         };
@@ -640,6 +642,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![TypedNode {
                 node,
                 register_types: reg_types,

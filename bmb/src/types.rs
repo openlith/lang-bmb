@@ -66,6 +66,8 @@ pub struct TypedProgram {
     pub imports: Vec<Import>,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
+    /// Named contract definitions for @requires expansion
+    pub contracts: Vec<ContractDef>,
     pub nodes: Vec<TypedNode>,
     pub registry: TypeRegistry,
 }
@@ -216,6 +218,7 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
         imports: program.imports.clone(),
         structs: program.structs.clone(),
         enums: program.enums.clone(),
+        contracts: program.contracts.clone(),
         nodes: typed_nodes,
         registry,
     })
@@ -269,6 +272,7 @@ pub fn typecheck_merged(merged: &crate::modules::MergedProgram) -> Result<TypedP
         imports: merged.main.imports.clone(),
         structs: merged.main.structs.clone(),
         enums: merged.main.enums.clone(),
+        contracts: merged.main.contracts.clone(),
         nodes: typed_nodes,
         registry,
     })
