@@ -476,7 +476,7 @@ mod tests {
         );
 
         // Caller: fn main() { call const42() }
-        let mut caller = make_simple_func(
+        let caller = make_simple_func(
             "main",
             vec![
                 IrInst::Call {

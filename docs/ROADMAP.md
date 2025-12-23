@@ -3,7 +3,7 @@
 > **"Omission is guessing, and guessing is error."**
 
 **Last Updated**: 2025-12-23
-**Current Version**: v0.7.0
+**Current Version**: v0.8.0
 **Target**: v1.0.0 (Performance Transcendence)
 
 ---
@@ -68,7 +68,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ---
 
-## v0.8.0: Efficient Explicitness & Collections
+## v0.8.0: Efficient Explicitness & Collections ✅
 
 **Goal**: Token-efficient syntax without compromising "Omission is guessing" philosophy, plus fundamental data structures
 
@@ -80,7 +80,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 | Task | Priority | Complexity | Status | AI Impact |
 |------|----------|------------|--------|-----------|
-| Refined Types (`@type`) | Critical | High | Planned | ✅ High signal (type name = constraint) |
+| Refined Types (`@type`) | Critical | High | ✅ Done | ✅ High signal (type name = constraint) |
 | Spec-Defined Defaults (zero-init) | Low | Medium | Conditional | ⚠️ Needs tooling (AI requires spec injection) |
 | Auto-SSA operator (`!`) | Low | Medium | Deferred | ❌ Hidden state harms AI understanding |
 
@@ -188,14 +188,15 @@ add %i_2 %i_1 1   # Clear: %i_2 depends on %i_1
 
 ### Part 2: Standard Library - Collections
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| `Vector<T>` - dynamic array | Critical | High |
-| `HashMap<K,V>` - hash table | Critical | Very High |
-| `Option<T>` - nullable alternative | Critical | Medium |
-| `Result<T,E>` - error handling | Critical | Medium |
-| `Slice<T>` - view into array | High | Medium |
-| `Range` - iteration bounds | High | Low |
+| Task | Priority | Complexity | Status |
+|------|----------|------------|--------|
+| `Option<T>` - nullable alternative (type) | Critical | Medium | ✅ Done |
+| `Result<T,E>` - error handling (type) | Critical | Medium | ✅ Done |
+| `Vector<T>` - dynamic array (type) | Critical | High | ✅ Done |
+| `Slice<T>` - view into array (type) | High | Medium | ✅ Done |
+| Collection stdlib implementation | Critical | Very High | Planned |
+| `HashMap<K,V>` - hash table | Critical | Very High | Planned |
+| `Range` - iteration bounds | High | Low | Planned |
 
 **Contract Examples** (using Refined Types):
 ```bmb
@@ -216,11 +217,13 @@ add %i_2 %i_1 1   # Clear: %i_2 depends on %i_1
 ```
 
 **Success Criteria**:
-- Refined Types grammar and type checker implemented
-- Spec-defined defaults documented and implemented
-- Auto-SSA experimental flag available
-- All collections have full @pre/@post contracts
-- Gold-level verification passes for core operations
+- ✅ Refined Types grammar, parser, and type checker implemented
+- ✅ Generic type definitions (Option<T>, Result<T,E>, Vector<T>, Slice<T>) implemented
+- ✅ Type compatibility checks for refined types
+- Spec-defined defaults documented and implemented (Conditional on v0.11.0)
+- Auto-SSA deferred (AI-native analysis)
+- Collection stdlib with full @pre/@post contracts (Next phase)
+- Gold-level verification passes for core operations (Next phase)
 
 ---
 
@@ -990,6 +993,7 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 8.2 | 2025-12-23 | v0.8.0 Complete: Refined Types, Option<T>, Result<T,E>, Vector<T>, Slice<T> type definitions implemented |
 | 8.1 | 2025-12-23 | AI-Native re-evaluation: "Signal Density" replaces "Token Efficiency"; Spec-Defined Defaults conditional on tooling; Auto-SSA deferred |
 | 8.0 | 2025-12-23 | v0.8.0 "Efficient Explicitness": Refined Types, Spec-Defined Defaults, Auto-SSA; v0.11.0 adds Structural Synthesis |
 | 7.1 | 2025-12-23 | v0.10.0 expanded to "Low-Level Safety": @consume, @device, @volatile; v0.11.0 adds invariant suggestion mode |
