@@ -281,7 +281,20 @@ pub fn typecheck_merged(merged: &crate::modules::MergedProgram) -> Result<TypedP
 /// Validate that a type is well-formed (all referenced types exist)
 fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
     match ty {
-        Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool | Type::Void => Ok(()),
+        // All primitive types are valid
+        Type::I8
+        | Type::I16
+        | Type::I32
+        | Type::I64
+        | Type::U8
+        | Type::U16
+        | Type::U32
+        | Type::U64
+        | Type::F32
+        | Type::F64
+        | Type::Bool
+        | Type::Char
+        | Type::Void => Ok(()),
         Type::Array { element, size } => {
             if *size == 0 {
                 return Err(BmbError::TypeError {
@@ -290,7 +303,7 @@ fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
             }
             validate_type(element, registry)
         }
-        Type::Ref(inner) => validate_type(inner, registry),
+        Type::Ref(inner) | Type::Ptr(inner) => validate_type(inner, registry),
         Type::Struct(name) => {
             if registry.get_struct(name).is_some() {
                 Ok(())

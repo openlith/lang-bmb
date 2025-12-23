@@ -202,12 +202,25 @@ pub struct Parameter {
 /// BMB types
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    // Primitive types
+    // Signed integer types
+    I8,
+    I16,
     I32,
     I64,
+
+    // Unsigned integer types
+    U8,
+    U16,
+    U32,
+    U64,
+
+    // Floating-point types
     F32,
     F64,
+
+    // Other primitive types
     Bool,
+    Char,
     Void,
 
     // Compound types
@@ -222,6 +235,8 @@ pub enum Type {
     Enum(String),
     /// Reference type: &T
     Ref(Box<Type>),
+    /// Pointer type: *T (raw pointer for low-level memory access)
+    Ptr(Box<Type>),
 }
 
 impl Type {
@@ -229,18 +244,40 @@ impl Type {
     pub fn is_primitive(&self) -> bool {
         matches!(
             self,
-            Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Bool | Type::Void
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+                | Type::F32
+                | Type::F64
+                | Type::Bool
+                | Type::Char
+                | Type::Void
         )
     }
 
-    /// Returns true if this is a numeric type
+    /// Returns true if this is a numeric type (integers and floats)
     pub fn is_numeric(&self) -> bool {
-        matches!(self, Type::I32 | Type::I64 | Type::F32 | Type::F64)
+        self.is_integer() || self.is_float()
     }
 
-    /// Returns true if this is an integer type
+    /// Returns true if this is an integer type (signed or unsigned)
     pub fn is_integer(&self) -> bool {
-        matches!(self, Type::I32 | Type::I64)
+        self.is_signed_integer() || self.is_unsigned_integer()
+    }
+
+    /// Returns true if this is a signed integer type
+    pub fn is_signed_integer(&self) -> bool {
+        matches!(self, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+    }
+
+    /// Returns true if this is an unsigned integer type
+    pub fn is_unsigned_integer(&self) -> bool {
+        matches!(self, Type::U8 | Type::U16 | Type::U32 | Type::U64)
     }
 
     /// Returns true if this is a float type
@@ -248,14 +285,34 @@ impl Type {
         matches!(self, Type::F32 | Type::F64)
     }
 
+    /// Returns true if this is a pointer type
+    pub fn is_pointer(&self) -> bool {
+        matches!(self, Type::Ptr(_))
+    }
+
+    /// Returns true if this is a reference type
+    pub fn is_reference(&self) -> bool {
+        matches!(self, Type::Ref(_))
+    }
+
     /// Returns the size in bytes for primitive types
     pub fn size_bytes(&self) -> Option<usize> {
         match self {
-            Type::I32 | Type::F32 => Some(4),
-            Type::I64 | Type::F64 => Some(8),
-            Type::Bool => Some(1),
+            Type::I8 | Type::U8 | Type::Bool => Some(1),
+            Type::I16 | Type::U16 => Some(2),
+            Type::I32 | Type::U32 | Type::F32 | Type::Char => Some(4),
+            Type::I64 | Type::U64 | Type::F64 => Some(8),
+            Type::Ptr(_) | Type::Ref(_) => Some(4), // 32-bit pointers for WASM32
             Type::Void => Some(0),
             _ => None, // Compound types need context to determine size
+        }
+    }
+
+    /// Returns the inner type for pointer and reference types
+    pub fn inner_type(&self) -> Option<&Type> {
+        match self {
+            Type::Ptr(inner) | Type::Ref(inner) => Some(inner),
+            _ => None,
         }
     }
 }
@@ -263,16 +320,24 @@ impl Type {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Type::I8 => write!(f, "i8"),
+            Type::I16 => write!(f, "i16"),
             Type::I32 => write!(f, "i32"),
             Type::I64 => write!(f, "i64"),
+            Type::U8 => write!(f, "u8"),
+            Type::U16 => write!(f, "u16"),
+            Type::U32 => write!(f, "u32"),
+            Type::U64 => write!(f, "u64"),
             Type::F32 => write!(f, "f32"),
             Type::F64 => write!(f, "f64"),
             Type::Bool => write!(f, "bool"),
+            Type::Char => write!(f, "char"),
             Type::Void => write!(f, "void"),
             Type::Array { element, size } => write!(f, "[{}; {}]", element, size),
             Type::Struct(name) => write!(f, "{}", name),
             Type::Enum(name) => write!(f, "{}", name),
             Type::Ref(inner) => write!(f, "&{}", inner),
+            Type::Ptr(inner) => write!(f, "*{}", inner),
         }
     }
 }

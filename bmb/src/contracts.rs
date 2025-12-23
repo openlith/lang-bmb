@@ -708,13 +708,20 @@ impl<'a> ContractCodeGenerator<'a> {
 /// Helper function to map Type to wasm ValType
 pub fn type_to_valtype(ty: &Type) -> ValType {
     match ty {
-        Type::I32 | Type::Bool => ValType::I32,
-        Type::I64 => ValType::I64,
+        // 8-bit, 16-bit, and 32-bit integers map to WASM i32
+        Type::I8 | Type::I16 | Type::I32 => ValType::I32,
+        Type::U8 | Type::U16 | Type::U32 => ValType::I32,
+        Type::Bool | Type::Char => ValType::I32,
+        // 64-bit integers map to WASM i64
+        Type::I64 | Type::U64 => ValType::I64,
+        // Floats
         Type::F32 => ValType::F32,
         Type::F64 => ValType::F64,
         Type::Void => ValType::I32, // Void uses i32 as placeholder
         // Compound types use i32 as pointer/reference
-        Type::Array { .. } | Type::Struct(_) | Type::Enum(_) | Type::Ref(_) => ValType::I32,
+        Type::Array { .. } | Type::Struct(_) | Type::Enum(_) | Type::Ref(_) | Type::Ptr(_) => {
+            ValType::I32
+        }
     }
 }
 

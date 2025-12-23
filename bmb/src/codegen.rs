@@ -76,17 +76,21 @@ impl StructLayout {
 /// Get size and alignment for a type
 fn type_size_align(ty: &Type) -> (u32, u32) {
     match ty {
-        Type::I32 | Type::Bool => (4, 4),
-        Type::I64 => (8, 8),
-        Type::F32 => (4, 4),
-        Type::F64 => (8, 8),
+        // 8-bit types (native size for memory layout)
+        Type::I8 | Type::U8 => (1, 1),
+        // 16-bit types
+        Type::I16 | Type::U16 => (2, 2),
+        // 32-bit types (Bool is i32 in WASM for efficiency)
+        Type::I32 | Type::U32 | Type::F32 | Type::Char | Type::Bool => (4, 4),
+        // 64-bit types
+        Type::I64 | Type::U64 | Type::F64 => (8, 8),
         Type::Void => (0, 1),
         Type::Array { element, size } => {
             let (elem_size, elem_align) = type_size_align(element);
             (elem_size * (*size as u32), elem_align)
         }
         // Pointers are 32-bit in WASM32
-        Type::Ref(_) => (4, 4),
+        Type::Ref(_) | Type::Ptr(_) => (4, 4),
         // Struct and Enum are handled via layout calculation
         Type::Struct(_) | Type::Enum(_) => (4, 4), // Placeholder - actual size from registry
     }
@@ -1195,8 +1199,13 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
 
 fn type_to_valtype(ty: &Type) -> ValType {
     match ty {
-        Type::I32 | Type::Bool => ValType::I32,
-        Type::I64 => ValType::I64,
+        // 8-bit, 16-bit, and 32-bit integers map to WASM i32
+        Type::I8 | Type::I16 | Type::I32 => ValType::I32,
+        Type::U8 | Type::U16 | Type::U32 => ValType::I32,
+        Type::Bool | Type::Char => ValType::I32,
+        // 64-bit integers map to WASM i64
+        Type::I64 | Type::U64 => ValType::I64,
+        // Floats
         Type::F32 => ValType::F32,
         Type::F64 => ValType::F64,
         // Compound types - map to i32 (pointer/index) for now
@@ -1205,6 +1214,7 @@ fn type_to_valtype(ty: &Type) -> ValType {
         Type::Struct(_) => ValType::I32,    // Struct base pointer
         Type::Enum(_) => ValType::I32,      // Enum discriminant
         Type::Ref(_) => ValType::I32,       // Reference pointer
+        Type::Ptr(_) => ValType::I32,       // Raw pointer
     }
 }
 

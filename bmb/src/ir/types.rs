@@ -86,14 +86,28 @@ pub enum IrType {
 impl From<&Type> for IrType {
     fn from(ty: &Type) -> Self {
         match ty {
-            Type::I32 => IrType::I32,
+            // Signed integers: 8/16/32-bit → I32, 64-bit → I64
+            Type::I8 | Type::I16 | Type::I32 => IrType::I32,
             Type::I64 => IrType::I64,
+
+            // Unsigned integers: 8/16/32-bit → I32, 64-bit → I64
+            Type::U8 | Type::U16 | Type::U32 => IrType::I32,
+            Type::U64 => IrType::I64,
+
+            // Floating-point types
             Type::F32 => IrType::F32,
             Type::F64 => IrType::F64,
+
+            // Other primitives
             Type::Bool => IrType::Bool,
+            Type::Char => IrType::I32, // UTF-32 codepoint stored as i32
             Type::Void => IrType::Void,
-            // Complex types lowered to I64 (pointer)
-            Type::Array { .. } | Type::Struct(_) | Type::Enum(_) | Type::Ref(_) => IrType::I64,
+
+            // Pointer/reference types: 32-bit pointers for WASM32
+            Type::Ptr(_) | Type::Ref(_) => IrType::I32,
+
+            // Complex types lowered to I32 (pointer for WASM32)
+            Type::Array { .. } | Type::Struct(_) | Type::Enum(_) => IrType::I32,
         }
     }
 }
