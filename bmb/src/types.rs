@@ -10,13 +10,15 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::{BmbError, Result};
 
-/// Registry for user-defined types (structs and enums)
+/// Registry for user-defined types (structs, enums, and refined types)
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
     /// Struct definitions by name
     pub structs: HashMap<String, StructDef>,
     /// Enum definitions by name
     pub enums: HashMap<String, EnumDef>,
+    /// Refined type definitions by name
+    pub refined_types: HashMap<String, TypeDef>,
 }
 
 impl TypeRegistry {
@@ -44,9 +46,11 @@ impl TypeRegistry {
         self.enums.get(name)
     }
 
-    /// Check if a type name is defined (either struct or enum)
+    /// Check if a type name is defined (struct, enum, or refined type)
     pub fn is_defined(&self, name: &str) -> bool {
-        self.structs.contains_key(name) || self.enums.contains_key(name)
+        self.structs.contains_key(name)
+            || self.enums.contains_key(name)
+            || self.refined_types.contains_key(name)
     }
 
     /// Get the type of a struct field
@@ -58,6 +62,62 @@ impl TypeRegistry {
                 .map(|f| &f.ty)
         })
     }
+
+    /// Register a refined type definition
+    pub fn add_refined_type(&mut self, def: TypeDef) {
+        self.refined_types.insert(def.name.name.clone(), def);
+    }
+
+    /// Get a refined type definition by name
+    pub fn get_refined_type(&self, name: &str) -> Option<&TypeDef> {
+        self.refined_types.get(name)
+    }
+
+    /// Resolve a refined type to its base type
+    /// Returns the base type if the name refers to a refined type, None otherwise
+    pub fn resolve_to_base_type(&self, name: &str) -> Option<&Type> {
+        self.refined_types.get(name).map(|def| &def.base_type)
+    }
+
+    /// Get the constraint expression for a refined type
+    /// Returns the constraint expression if the name refers to a refined type, None otherwise
+    pub fn get_refined_constraint(&self, name: &str) -> Option<&Expr> {
+        self.refined_types.get(name).map(|def| &def.constraint)
+    }
+
+    /// Resolve a type to its underlying base type
+    /// For refined types (like nz_i32), returns the base type (i32)
+    /// For Type::Struct that names a refined type, returns the base type
+    /// For all other types, returns the type as-is
+    pub fn resolve_type_to_base(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Struct(name) => {
+                // Check if this is a refined type name
+                if let Some(base) = self.resolve_to_base_type(name) {
+                    base.clone()
+                } else {
+                    ty.clone()
+                }
+            }
+            Type::Refined { name, .. } => {
+                // Look up the refined type definition and return its base type
+                if let Some(base) = self.resolve_to_base_type(name) {
+                    base.clone()
+                } else {
+                    ty.clone()
+                }
+            }
+            // All other types pass through unchanged
+            _ => ty.clone(),
+        }
+    }
+
+    /// Check if two types are compatible (same base type after resolving refined types)
+    pub fn types_compatible(&self, a: &Type, b: &Type) -> bool {
+        let base_a = self.resolve_type_to_base(a);
+        let base_b = self.resolve_type_to_base(b);
+        base_a == base_b
+    }
 }
 
 /// Type-checked AST (extends AST with type annotations)
@@ -66,6 +126,8 @@ pub struct TypedProgram {
     pub imports: Vec<Import>,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
+    /// Refined type definitions
+    pub type_defs: Vec<TypeDef>,
     /// Named contract definitions for @requires expansion
     pub contracts: Vec<ContractDef>,
     pub nodes: Vec<TypedNode>,
@@ -166,6 +228,16 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
         registry.add_enum(enum_def.clone());
     }
 
+    // Phase 0b: Register refined type definitions
+    for type_def in &program.type_defs {
+        if registry.is_defined(&type_def.name.name) {
+            return Err(BmbError::TypeError {
+                message: format!("Duplicate type definition: {}", type_def.name.name),
+            });
+        }
+        registry.add_refined_type(type_def.clone());
+    }
+
     // Phase 1: Validate struct field types exist
     for struct_def in &program.structs {
         for field in &struct_def.fields {
@@ -180,6 +252,14 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
                 validate_type(ty, &registry)?;
             }
         }
+    }
+
+    // Phase 2b: Validate refined type base types exist and constraints are valid
+    for type_def in &program.type_defs {
+        validate_type(&type_def.base_type, &registry)?;
+        // Validate the constraint expression is well-formed
+        // Note: The constraint can reference 'self' which refers to the value being constrained
+        validate_refined_constraint(&type_def.constraint, &type_def.base_type)?;
     }
 
     // Phase 3: Collect imported function signatures
@@ -218,6 +298,7 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
         imports: program.imports.clone(),
         structs: program.structs.clone(),
         enums: program.enums.clone(),
+        type_defs: program.type_defs.clone(),
         contracts: program.contracts.clone(),
         nodes: typed_nodes,
         registry,
@@ -233,12 +314,15 @@ pub fn typecheck_merged(merged: &crate::modules::MergedProgram) -> Result<TypedP
     let mut global_env = TypeEnv::new();
     let mut registry = TypeRegistry::new();
 
-    // Phase 0: Build type registry from struct and enum definitions
+    // Phase 0: Build type registry from struct, enum, and refined type definitions
     for struct_def in &merged.main.structs {
         registry.add_struct(struct_def.clone());
     }
     for enum_def in &merged.main.enums {
         registry.add_enum(enum_def.clone());
+    }
+    for type_def in &merged.main.type_defs {
+        registry.add_refined_type(type_def.clone());
     }
 
     // Phase 1: Register module functions with qualified names
@@ -272,6 +356,7 @@ pub fn typecheck_merged(merged: &crate::modules::MergedProgram) -> Result<TypedP
         imports: merged.main.imports.clone(),
         structs: merged.main.structs.clone(),
         enums: merged.main.enums.clone(),
+        type_defs: merged.main.type_defs.clone(),
         contracts: merged.main.contracts.clone(),
         nodes: typed_nodes,
         registry,
@@ -310,6 +395,9 @@ fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
             } else if registry.get_enum(name).is_some() {
                 // User wrote MyEnum but it's parsed as Struct - remap
                 Ok(())
+            } else if registry.get_refined_type(name).is_some() {
+                // User wrote a refined type name (e.g., nz_i32) - valid
+                Ok(())
             } else {
                 Err(BmbError::TypeError {
                     message: format!("Unknown type: {}", name),
@@ -326,16 +414,52 @@ fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
             }
         }
         Type::Refined { name, .. } => {
-            // TODO: Validate refined type exists in registry when type registry supports it
-            // For now, accept all refined types (will be validated in Phase 2)
+            // Validate refined type exists in registry
             if name.is_empty() {
                 Err(BmbError::TypeError {
                     message: "Refined type name cannot be empty".to_string(),
                 })
+            } else if registry.get_refined_type(name).is_some() {
+                Ok(())
             } else {
+                // It might be a parameterized refined type usage - check if base name exists
+                // For now, just accept it since parsing validated the syntax
                 Ok(())
             }
         }
+    }
+}
+
+/// Validate that a refined type constraint expression is well-formed
+///
+/// The constraint can use 'self' to refer to the value being constrained,
+/// as well as literals and basic operators.
+fn validate_refined_constraint(constraint: &Expr, _base_type: &Type) -> Result<()> {
+    // For now, perform basic validation that the constraint is a valid boolean expression
+    // In the future, we could verify that 'self' is used appropriately for the base type
+    validate_constraint_expr(constraint)
+}
+
+/// Recursively validate a constraint expression
+fn validate_constraint_expr(expr: &Expr) -> Result<()> {
+    match expr {
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::SelfRef => Ok(()),
+        Expr::Var(_) => {
+            // Variables in constraints should only be 'self' (Expr::SelfRef)
+            // but we allow parameter names in parameterized refined types
+            Ok(())
+        }
+        Expr::Ret => Err(BmbError::TypeError {
+            message: "'ret' cannot be used in refined type constraints".to_string(),
+        }),
+        Expr::Old(_) => Err(BmbError::TypeError {
+            message: "'old()' cannot be used in refined type constraints".to_string(),
+        }),
+        Expr::Binary { left, right, .. } => {
+            validate_constraint_expr(left)?;
+            validate_constraint_expr(right)
+        }
+        Expr::Unary { operand, .. } => validate_constraint_expr(operand),
     }
 }
 
@@ -415,7 +539,8 @@ fn typecheck_statement(
             let (type_a, type_b) =
                 get_operand_types(&stmt.operands[1], &stmt.operands[2], env, registry)?;
 
-            if type_a != type_b {
+            // Resolve refined types to base types for comparison
+            if !registry.types_compatible(&type_a, &type_b) {
                 return Err(BmbError::TypeError {
                     message: format!(
                         "{} operands must have same type: {} vs {}",
@@ -424,9 +549,9 @@ fn typecheck_statement(
                 });
             }
 
-            // Set result register type
+            // Set result register type (use resolved base type)
             if let Operand::Register(ref r) = stmt.operands[0] {
-                env.add_register(&r.name, type_a);
+                env.add_register(&r.name, registry.resolve_type_to_base(&type_a));
             }
         }
 
@@ -446,7 +571,8 @@ fn typecheck_statement(
             let (type_a, type_b) =
                 get_operand_types(&stmt.operands[1], &stmt.operands[2], env, registry)?;
 
-            if type_a != type_b {
+            // Resolve refined types to base types for comparison
+            if !registry.types_compatible(&type_a, &type_b) {
                 return Err(BmbError::TypeError {
                     message: format!(
                         "{} operands must have same type: {} vs {}",
@@ -455,8 +581,9 @@ fn typecheck_statement(
                 });
             }
 
-            // Bitwise operations only work on integer types
-            if !type_a.is_integer() && type_a != Type::Bool {
+            // Bitwise operations only work on integer types (use resolved base type)
+            let base_type = registry.resolve_type_to_base(&type_a);
+            if !base_type.is_integer() && base_type != Type::Bool {
                 return Err(BmbError::TypeError {
                     message: format!(
                         "{} requires integer operands, got {}",
@@ -465,9 +592,9 @@ fn typecheck_statement(
                 });
             }
 
-            // Set result register type (same as operands)
+            // Set result register type (use resolved base type)
             if let Operand::Register(ref r) = stmt.operands[0] {
-                env.add_register(&r.name, type_a);
+                env.add_register(&r.name, base_type);
             }
         }
 
@@ -517,7 +644,7 @@ fn typecheck_statement(
             let (type_a, type_b) =
                 get_operand_types(&stmt.operands[1], &stmt.operands[2], env, registry)?;
 
-            if type_a != type_b {
+            if !registry.types_compatible(&type_a, &type_b) {
                 return Err(BmbError::TypeError {
                     message: format!(
                         "{} operands must have same type: {} vs {}",
@@ -540,7 +667,7 @@ fn typecheck_statement(
             }
 
             let ret_type = get_operand_type(&stmt.operands[0], env, registry)?;
-            if ret_type != *return_type {
+            if !registry.types_compatible(&ret_type, return_type) {
                 return Err(BmbError::TypeError {
                     message: format!(
                         "Return type mismatch: expected {}, got {}",
@@ -1247,5 +1374,112 @@ _less:
         // Incompatible types
         assert_eq!(unified_comparison_type(&Type::I32, &Type::F64), None);
         assert_eq!(unified_comparison_type(&Type::Bool, &Type::I32), None);
+    }
+
+    #[test]
+    fn test_typecheck_refined_type_definition() {
+        let source = r#"
+@type nz_i32 i32 where self != 0
+
+@node divide
+@params a:i32 b:i32
+@returns i32
+  div %r a b
+  ret %r
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Refined type definition failed: {:?}", result.err());
+
+        let typed = result.unwrap();
+        // Check that the refined type is registered
+        assert!(typed.registry.get_refined_type("nz_i32").is_some());
+
+        // Check that type_defs is populated
+        assert_eq!(typed.type_defs.len(), 1);
+        assert_eq!(typed.type_defs[0].name.name, "nz_i32");
+    }
+
+    #[test]
+    fn test_typecheck_refined_type_base_resolution() {
+        let mut registry = TypeRegistry::new();
+        registry.add_refined_type(TypeDef {
+            name: Identifier {
+                name: "positive_i32".to_string(),
+                span: Span::default(),
+            },
+            params: vec![],
+            base_type: Type::I32,
+            constraint: Expr::Binary {
+                op: BinaryOp::Gt,
+                left: Box::new(Expr::SelfRef),
+                right: Box::new(Expr::IntLit(0)),
+            },
+            span: Span::default(),
+        });
+
+        // Check that we can resolve to base type
+        assert_eq!(registry.resolve_to_base_type("positive_i32"), Some(&Type::I32));
+        assert!(registry.is_defined("positive_i32"));
+    }
+
+    #[test]
+    fn test_typecheck_refined_type_with_function_using_it() {
+        let source = r#"
+@type nz_i32 i32 where self != 0
+
+@node safe_divide
+@params a:i32 b:nz_i32
+@returns i32
+  div %r a b
+  ret %r
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Function using refined type failed: {:?}", result.err());
+
+        let typed = result.unwrap();
+        // The function should typecheck successfully
+        assert_eq!(typed.nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_refined_type_duplicate_error() {
+        let source = r#"
+@type nz_i32 i32 where self != 0
+@type nz_i32 i32 where self > 0
+
+@node test
+@params
+@returns i32
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_err(), "Duplicate refined type should fail");
+        let err = result.err().unwrap();
+        assert!(err.to_string().contains("Duplicate type definition"));
+    }
+
+    #[test]
+    fn test_refined_constraint_invalid_ret() {
+        // Test that 'ret' in constraint is rejected
+        let constraint = Expr::Binary {
+            op: BinaryOp::Eq,
+            left: Box::new(Expr::Ret),
+            right: Box::new(Expr::IntLit(0)),
+        };
+        let result = validate_constraint_expr(&constraint);
+        assert!(result.is_err());
+        assert!(result.err().unwrap().to_string().contains("'ret' cannot be used"));
+    }
+
+    #[test]
+    fn test_refined_constraint_invalid_old() {
+        // Test that 'old()' in constraint is rejected
+        let constraint = Expr::Old(Box::new(Expr::SelfRef));
+        let result = validate_constraint_expr(&constraint);
+        assert!(result.is_err());
+        assert!(result.err().unwrap().to_string().contains("'old()' cannot be used"));
     }
 }

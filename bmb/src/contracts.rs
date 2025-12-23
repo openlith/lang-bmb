@@ -773,6 +773,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            type_defs: vec![],
             contracts: vec![],
             nodes: vec![TypedNode {
                 node,
@@ -900,6 +901,7 @@ mod tests {
             imports: vec![],
             structs: vec![],
             enums: vec![],
+            type_defs: vec![],
             contracts: vec![],
             nodes: vec![TypedNode {
                 node,
