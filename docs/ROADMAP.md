@@ -3,7 +3,7 @@
 > **"Omission is guessing, and guessing is error."**
 
 **Last Updated**: 2025-12-23
-**Current Version**: v0.6.0
+**Current Version**: v0.7.0
 **Target**: v1.0.0 (Performance Transcendence)
 
 ---
@@ -24,7 +24,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ---
 
-## Current State (v0.6.0)
+## Current State (v0.7.0)
 
 ### Implemented Features
 
@@ -32,17 +32,18 @@ v1.0.0: Performance Transcendence Complete 🎯
 |----------|----------|
 | **Parser** | PEG grammar, pest parser, error reporting |
 | **Types** | i8-i64, u8-u64, f32, f64, bool, char, arrays, structs, enums, refs, pointers |
-| **Contracts** | @pre, @post, @invariant, runtime verification |
+| **Contracts** | @pre, @post, @invariant, @requires, @pure, @contract, @assert, @variant, runtime & static verification |
 | **Codegen** | WASM, x64 ELF64/PE64/Mach-O64, ARM64 ELF64 |
-| **Verification** | SMT (Z3/CVC4/CVC5), static contract proving (Gold level) |
+| **Verification** | SMT (Z3/CVC4/CVC5), static contract proving (Gold level), purity checking |
 | **DevEx** | LSP server, formatter, linter |
 | **Modules** | @use, @import, qualified calls, namespace |
 | **Optimization** | IR, constant folding, DCE, function inlining |
 | **Package Manager** | Gotgan with Cargo fallback |
+| **Bitwise ISA** | and, or, xor, shl, shr, not |
 
 ---
 
-## v0.7.0: Contract System Completion
+## v0.7.0: Contract System Completion ✅
 
 **Goal**: Complete the contract system for mathematical proof claims
 
@@ -54,15 +55,16 @@ v1.0.0: Performance Transcendence Complete 🎯
 | `@contract` named contract definitions | High | ✅ Done |
 | `@constraint` timing (on_create/on_mutate) | High | ✅ Spec |
 | Bitwise ISA (and/or/xor/shl/shr/not) | High | ✅ Done |
-| `@requires` verification logic | Critical | 🔄 In Progress |
-| `@pure` verification logic | Critical | 🔄 In Progress |
-| Loop invariant support in verifier | Critical | Planned |
+| `@requires` verification logic | Critical | ✅ Done |
+| `@pure` verification logic | Critical | ✅ Done |
+| Loop invariant runtime verification | Critical | ✅ Done |
 
 **Success Criteria**:
-- `@variant` proves termination for recursive functions
-- `@pure` functions verified for referential transparency
-- Contract chaining works with `@requires`
-- Bitwise operations available for systems programming
+- ✅ `@variant` proves termination for recursive functions
+- ✅ `@pure` functions verified for referential transparency (no xcall, print, or impure calls)
+- ✅ Contract chaining works with `@requires` (parameter substitution)
+- ✅ Bitwise operations available for systems programming
+- ✅ Loop invariants verified at runtime (trap on violation)
 
 ---
 
@@ -696,6 +698,7 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 7.0 | 2025-12-23 | v0.7.0 complete: @requires chaining, @pure verification, @invariant runtime checks |
 | 6.0 | 2025-12-23 | Version restructure: v1.0.0 = Performance Transcendence, all prior stages v0.x |
 | 5.0 | 2025-12-23 | Performance Transcendence Roadmap (Bronze/Silver/Gold stages, research-backed) |
 | 4.0 | 2025-12-23 | Extended roadmap v0.7-v0.15, realistic phases |
