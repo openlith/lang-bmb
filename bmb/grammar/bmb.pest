@@ -1,5 +1,11 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.4
+// Version 0.5
+//
+// Changes in 0.5:
+//   - Added @variant|@% (termination proof)
+//   - Added @pure|@! (no side effects)
+//   - Added @requires|@& (contract reference)
+//   - Changed @assert compact from @! to @!!
 //
 // "Omission is guessing, and guessing is error."
 //
@@ -107,8 +113,8 @@ param = { ident ~ ":" ~ type_name }
 returns = { ("@returns" | "@r") ~ type_name }
 
 // Contracts (replaces comments with verifiable rules)
-// Can have multiple @pre, @post, @invariant, @assert
-contracts = { (pre | post | invariant | assert_stmt)* }
+// Can have multiple @pre, @post, @invariant, @assert, @variant, @pure, @requires
+contracts = { (pre | post | invariant | assert_stmt | variant | pure | requires)* }
 
 // Precondition: @pre condition  OR  @< condition (compact)
 pre = { ("@pre" | "@<") ~ expr }
@@ -119,9 +125,22 @@ post = { ("@post" | "@>") ~ expr }
 // Loop invariant: @invariant _label condition  OR  @~ _label condition (compact)
 invariant = { ("@invariant" | "@~") ~ label_ref ~ expr }
 
-// Inline assertion: @assert condition  OR  @! condition (compact)
+// Inline assertion: @assert condition  OR  @!! condition (compact)
 // Note: assertions are checked at the point they appear in code
-assert_stmt = { ("@assert" | "@!") ~ expr }
+assert_stmt = { ("@assert" | "@!!") ~ expr }
+
+// Termination proof: @variant measure  OR  @% measure (compact)
+// The measure expression must decrease with each recursive call or loop iteration
+variant = { ("@variant" | "@%") ~ expr }
+
+// Purity annotation: @pure  OR  @! (compact)
+// Declares that the function has no side effects and is referentially transparent
+pure = { ("@pure" | "@!") }
+
+// Contract reference: @requires contract_name(args)  OR  @& contract_name(args) (compact)
+// References a named contract or another node's contract for reuse
+requires = { ("@requires" | "@&") ~ ident ~ "(" ~ requires_args? ~ ")" }
+requires_args = { expr ~ ("," ~ expr)* }
 
 // Function body - explicitly mark start with indented instructions
 body = { (label | stmt)+ }
