@@ -525,11 +525,22 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type> {
             parse_type(pair.into_inner().next().unwrap())
         }
         Rule::primitive_type => match pair.as_str() {
+            // Signed integers
+            "i8" => Ok(Type::I8),
+            "i16" => Ok(Type::I16),
             "i32" => Ok(Type::I32),
             "i64" => Ok(Type::I64),
+            // Unsigned integers
+            "u8" => Ok(Type::U8),
+            "u16" => Ok(Type::U16),
+            "u32" => Ok(Type::U32),
+            "u64" => Ok(Type::U64),
+            // Floating-point
             "f32" => Ok(Type::F32),
             "f64" => Ok(Type::F64),
+            // Other primitives
             "bool" => Ok(Type::Bool),
+            "char" => Ok(Type::Char),
             "void" => Ok(Type::Void),
             other => Err(BmbError::ParseError {
                 line: 0,
@@ -557,6 +568,11 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type> {
             let inner_type = parse_type(pair.into_inner().next().unwrap())?;
             Ok(Type::Ref(Box::new(inner_type)))
         }
+        Rule::ptr_type => {
+            // ptr_type = { "*" ~ type_spec }
+            let inner_type = parse_type(pair.into_inner().next().unwrap())?;
+            Ok(Type::Ptr(Box::new(inner_type)))
+        }
         Rule::user_type => {
             // User-defined type (struct or enum name)
             // We'll resolve whether it's a struct or enum during type checking
@@ -565,11 +581,18 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type> {
         _ => {
             // Fallback for simple type names (backwards compatibility)
             match pair.as_str() {
+                "i8" => Ok(Type::I8),
+                "i16" => Ok(Type::I16),
                 "i32" => Ok(Type::I32),
                 "i64" => Ok(Type::I64),
+                "u8" => Ok(Type::U8),
+                "u16" => Ok(Type::U16),
+                "u32" => Ok(Type::U32),
+                "u64" => Ok(Type::U64),
                 "f32" => Ok(Type::F32),
                 "f64" => Ok(Type::F64),
                 "bool" => Ok(Type::Bool),
+                "char" => Ok(Type::Char),
                 "void" => Ok(Type::Void),
                 other => Err(BmbError::ParseError {
                     line: 0,
@@ -1682,5 +1705,87 @@ _base:
         assert!(result.is_ok(), "Should parse @contract with no params: {:?}", result.err());
         let program = result.unwrap();
         assert_eq!(program.contracts[0].params.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_all_integer_types() {
+        let source = r#"
+@node test_integers
+@params a:i8 b:i16 c:i32 d:i64 e:u8 f:u16 g:u32 h:u64
+@returns i32
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "All integer types should parse: {:?}", result.err());
+        let program = result.unwrap();
+        let params = &program.nodes[0].params;
+        assert_eq!(params[0].ty, Type::I8);
+        assert_eq!(params[1].ty, Type::I16);
+        assert_eq!(params[2].ty, Type::I32);
+        assert_eq!(params[3].ty, Type::I64);
+        assert_eq!(params[4].ty, Type::U8);
+        assert_eq!(params[5].ty, Type::U16);
+        assert_eq!(params[6].ty, Type::U32);
+        assert_eq!(params[7].ty, Type::U64);
+    }
+
+    #[test]
+    fn test_parse_char_type() {
+        let source = r#"
+@node test_char
+@params c:char
+@returns char
+
+  ret c
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Char type should parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.nodes[0].params[0].ty, Type::Char);
+        assert_eq!(program.nodes[0].returns, Type::Char);
+    }
+
+    #[test]
+    fn test_parse_ptr_type() {
+        let source = r#"
+@node test_ptr
+@params ptr:*i32 buf:*u8
+@returns *i32
+
+  ret ptr
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Pointer types should parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.nodes[0].params[0].ty {
+            Type::Ptr(inner) => assert_eq!(**inner, Type::I32),
+            _ => panic!("Expected pointer type"),
+        }
+        match &program.nodes[0].params[1].ty {
+            Type::Ptr(inner) => assert_eq!(**inner, Type::U8),
+            _ => panic!("Expected pointer type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_ptr_type() {
+        let source = r#"
+@node test_nested_ptr
+@params pp:**i32
+@returns **i32
+
+  ret pp
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Nested pointer types should parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.nodes[0].params[0].ty {
+            Type::Ptr(inner) => match &**inner {
+                Type::Ptr(innermost) => assert_eq!(**innermost, Type::I32),
+                _ => panic!("Expected nested pointer type"),
+            },
+            _ => panic!("Expected pointer type"),
+        }
     }
 }
