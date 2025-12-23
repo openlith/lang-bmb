@@ -1489,4 +1489,108 @@ _less:
         assert!(result.is_err());
         assert!(result.err().unwrap().to_string().contains("'old()' cannot be used"));
     }
+
+    #[test]
+    fn test_typecheck_option_param() {
+        // Test Option<T> type as parameter - type is valid
+        let source = r#"
+@node maybe_value
+@params x:Option<i32>
+@returns i32
+
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Option parameter type should typecheck: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_typecheck_result_param() {
+        // Test Result<T, E> type as parameter - type is valid
+        let source = r#"
+@node handle_result
+@params r:Result<i32, bool>
+@returns i32
+
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Result parameter type should typecheck: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_typecheck_vector_param() {
+        // Test Vector<T> type as parameter - type is valid
+        let source = r#"
+@node sum_vector
+@params v:Vector<f64>
+@returns f64
+
+  ret 0.0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Vector parameter type should typecheck: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_typecheck_slice_param() {
+        // Test Slice<T> type as parameter - type is valid
+        let source = r#"
+@node process_slice
+@params s:Slice<i32>
+@returns i32
+
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Slice parameter type should typecheck: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_typecheck_nested_generic_param() {
+        // Test nested generic types: Option<Result<i32, bool>> as parameter
+        let source = r#"
+@node complex
+@params x:Option<Result<i32, bool>>
+@returns i32
+
+  ret 0
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Nested generic parameter type should typecheck: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_validate_generic_types() {
+        // Test that all generic types are validated correctly
+        let registry = TypeRegistry::default();
+
+        // Option<i32> is valid
+        let opt_type = Type::Option(Box::new(Type::I32));
+        assert!(validate_type(&opt_type, &registry).is_ok());
+
+        // Result<i32, bool> is valid
+        let result_type = Type::Result {
+            ok: Box::new(Type::I32),
+            err: Box::new(Type::Bool),
+        };
+        assert!(validate_type(&result_type, &registry).is_ok());
+
+        // Vector<f64> is valid
+        let vec_type = Type::Vector(Box::new(Type::F64));
+        assert!(validate_type(&vec_type, &registry).is_ok());
+
+        // Slice<i32> is valid
+        let slice_type = Type::Slice(Box::new(Type::I32));
+        assert!(validate_type(&slice_type, &registry).is_ok());
+
+        // Nested: Option<Vector<i32>> is valid
+        let nested_type = Type::Option(Box::new(Type::Vector(Box::new(Type::I32))));
+        assert!(validate_type(&nested_type, &registry).is_ok());
+    }
 }
