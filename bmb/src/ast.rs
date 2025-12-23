@@ -94,6 +94,26 @@ pub struct Invariant {
     pub span: Span,
 }
 
+/// A termination proof variant (@variant / @%)
+/// The measure expression must decrease with each recursive call or loop iteration
+#[derive(Debug, Clone)]
+pub struct Variant {
+    /// The measure expression that must decrease toward a base case
+    pub measure: Expr,
+    pub span: Span,
+}
+
+/// A contract reference (@requires / @&)
+/// References a named contract or another node's contract for reuse
+#[derive(Debug, Clone)]
+pub struct Requires {
+    /// The referenced contract name
+    pub contract: Identifier,
+    /// Arguments to bind to the contract parameters
+    pub args: Vec<Expr>,
+    pub span: Span,
+}
+
 /// A function node in BMB
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -108,7 +128,13 @@ pub struct Node {
     pub postconditions: Vec<Expr>,
     /// Loop invariants: @invariant _label condition (@~ compact)
     pub invariants: Vec<Invariant>,
-    /// Inline assertions: @assert condition (@! compact)
+    /// Termination proof variants: @variant measure (@% compact)
+    pub variants: Vec<Variant>,
+    /// Purity annotation: @pure (@! compact) - no side effects
+    pub pure: bool,
+    /// Contract references: @requires contract(args) (@& compact)
+    pub requires: Vec<Requires>,
+    /// Inline assertions: @assert condition (@!! compact)
     pub assertions: Vec<Assert>,
     /// Test cases: @test expect(...) (@? compact)
     pub tests: Vec<TestCase>,
@@ -116,7 +142,7 @@ pub struct Node {
     pub span: Span,
 }
 
-/// An inline assertion (@assert / @!)
+/// An inline assertion (@assert / @!!)
 #[derive(Debug, Clone)]
 pub struct Assert {
     pub condition: Expr,

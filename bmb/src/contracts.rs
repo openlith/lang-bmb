@@ -492,6 +492,9 @@ mod tests {
             preconditions: vec![],
             postconditions: vec![],
             invariants: vec![],
+            variants: vec![],
+            pure: false,
+            requires: vec![],
             assertions: vec![],
             tests: vec![],
             body: vec![],
@@ -608,6 +611,9 @@ mod tests {
             preconditions: vec![],
             postconditions: vec![],
             invariants: vec![],
+            variants: vec![],
+            pure: false,
+            requires: vec![],
             assertions: vec![crate::ast::Assert {
                 condition: Expr::Binary {
                     op: BinaryOp::Ge,

@@ -213,6 +213,9 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
     let mut preconditions = Vec::new();
     let mut postconditions = Vec::new();
     let mut invariants = Vec::new();
+    let mut variants = Vec::new();
+    let mut pure = false;
+    let mut requires = Vec::new();
     let mut assertions = Vec::new();
     let mut tests = Vec::new();
     let mut body = Vec::new();
@@ -236,7 +239,7 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
                 returns = parse_type(item.into_inner().next().unwrap())?;
             }
             Rule::contracts => {
-                // Parse contracts: @pre, @post, @invariant, @assert (and compact forms)
+                // Parse contracts: @pre, @post, @invariant, @assert, @variant, @pure, @requires
                 for contract in item.into_inner() {
                     match contract.as_rule() {
                         Rule::pre => {
@@ -266,6 +269,35 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
                                 span: assert_span,
                             });
                         }
+                        Rule::variant => {
+                            let var_span = pair_to_span(&contract);
+                            let measure = parse_expr(contract.into_inner().next().unwrap())?;
+                            variants.push(Variant {
+                                measure,
+                                span: var_span,
+                            });
+                        }
+                        Rule::pure => {
+                            pure = true;
+                        }
+                        Rule::requires => {
+                            let req_span = pair_to_span(&contract);
+                            let mut req_inner = contract.into_inner();
+                            let contract_name = parse_identifier(req_inner.next().unwrap())?;
+                            let mut args = Vec::new();
+                            if let Some(args_pair) = req_inner.next() {
+                                if args_pair.as_rule() == Rule::requires_args {
+                                    for arg in args_pair.into_inner() {
+                                        args.push(parse_expr(arg)?);
+                                    }
+                                }
+                            }
+                            requires.push(Requires {
+                                contract: contract_name,
+                                args,
+                                span: req_span,
+                            });
+                        }
                         _ => {}
                     }
                 }
@@ -293,6 +325,9 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
         preconditions,
         postconditions,
         invariants,
+        variants,
+        pure,
+        requires,
         assertions,
         tests,
         body,
@@ -1178,5 +1213,158 @@ _one:
         assert_eq!(program.enums.len(), 1);
         assert_eq!(program.enums[0].name.name, "Color");
         assert_eq!(program.enums[0].variants.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_variant() {
+        let source = r#"
+@node factorial
+@params n:i32
+@returns i32
+@pre n >= 0
+@variant n
+@post ret >= 1
+
+  lt %is_base n 2
+  jif %is_base _base
+  sub %n1 n 1
+  call %rec factorial %n1
+  mul %result n %rec
+  ret %result
+_base:
+  ret 1
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @variant: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        assert_eq!(program.nodes[0].variants.len(), 1);
+        // The measure should be the variable 'n'
+        match &program.nodes[0].variants[0].measure {
+            Expr::Var(ident) => assert_eq!(ident.name, "n"),
+            _ => panic!("Expected variable 'n' as variant measure"),
+        }
+    }
+
+    #[test]
+    fn test_parse_variant_compact() {
+        let source = r#"
+@node gcd
+@p a:i32 b:i32
+@r i32
+@< a >= 0 && b >= 0
+@% a + b
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @% (compact variant): {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.nodes[0].variants.len(), 1);
+        // The measure should be a + b
+        match &program.nodes[0].variants[0].measure {
+            Expr::Binary { op: BinaryOp::Add, .. } => (),
+            _ => panic!("Expected 'a + b' as variant measure"),
+        }
+    }
+
+    #[test]
+    fn test_parse_pure() {
+        let source = r#"
+@node square
+@params x:i32
+@returns i32
+@pure
+@post ret == x * x
+
+  mul %r x x
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @pure: {:?}", result.err());
+        let program = result.unwrap();
+        assert!(program.nodes[0].pure, "Node should be marked as pure");
+    }
+
+    #[test]
+    fn test_parse_pure_compact() {
+        let source = r#"
+@node identity
+@p x:i32
+@r i32
+@!
+@> ret == x
+
+  ret x
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @! (compact pure): {:?}", result.err());
+        let program = result.unwrap();
+        assert!(program.nodes[0].pure, "Node should be marked as pure");
+    }
+
+    #[test]
+    fn test_parse_requires() {
+        let source = r#"
+@node safe_divide
+@params a:i32 b:i32
+@returns i32
+@requires non_zero(b)
+@post true
+
+  div %r a b
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @requires: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.nodes[0].requires.len(), 1);
+        assert_eq!(program.nodes[0].requires[0].contract.name, "non_zero");
+        assert_eq!(program.nodes[0].requires[0].args.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_requires_compact() {
+        let source = r#"
+@node sqrt_safe
+@p x:f64
+@r f64
+@& non_negative(x)
+
+  ret x
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @& (compact requires): {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.nodes[0].requires.len(), 1);
+        assert_eq!(program.nodes[0].requires[0].contract.name, "non_negative");
+    }
+
+    #[test]
+    fn test_parse_multiple_contracts() {
+        let source = r#"
+@node complex_fn
+@params a:i32 b:i32
+@returns i32
+@pre a > 0
+@pre b > 0
+@variant a + b
+@pure
+@requires positive(a)
+@requires positive(b)
+@post ret > 0
+
+  add %r a b
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse multiple contracts: {:?}", result.err());
+        let program = result.unwrap();
+        let node = &program.nodes[0];
+        assert_eq!(node.preconditions.len(), 2);
+        assert_eq!(node.variants.len(), 1);
+        assert!(node.pure);
+        assert_eq!(node.requires.len(), 2);
+        assert_eq!(node.postconditions.len(), 1);
     }
 }
