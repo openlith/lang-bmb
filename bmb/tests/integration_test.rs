@@ -1576,3 +1576,204 @@ _loop:
     let result = count_from.call(&mut store, (-5, 5));
     assert!(result.is_err(), "Should trap when invariant is violated");
 }
+
+// ============================================================================
+// New Type System Tests (v0.7.5)
+// ============================================================================
+
+#[test]
+fn test_execute_u8_addition() {
+    let source = r#"
+# Unsigned 8-bit addition (maps to i32 in WASM)
+@node sum_u8
+@params a:u8 b:u8
+@returns u8
+
+  add %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    // u8 is represented as i32 in WASM
+    let sum_u8 = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "sum_u8")
+        .expect("sum_u8 function not found");
+
+    // Test: 100 + 50 = 150
+    let result = sum_u8.call(&mut store, (100, 50)).expect("call failed");
+    assert_eq!(result, 150);
+
+    // Test: 0 + 0 = 0
+    let result = sum_u8.call(&mut store, (0, 0)).expect("call failed");
+    assert_eq!(result, 0);
+}
+
+#[test]
+fn test_execute_i16_subtraction() {
+    let source = r#"
+# Signed 16-bit subtraction (maps to i32 in WASM)
+@node diff_i16
+@params a:i16 b:i16
+@returns i16
+
+  sub %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    // i16 is represented as i32 in WASM
+    let diff_i16 = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "diff_i16")
+        .expect("diff_i16 function not found");
+
+    // Test: 1000 - 500 = 500
+    let result = diff_i16.call(&mut store, (1000, 500)).expect("call failed");
+    assert_eq!(result, 500);
+
+    // Test: -100 - 100 = -200
+    let result = diff_i16.call(&mut store, (-100, 100)).expect("call failed");
+    assert_eq!(result, -200);
+}
+
+#[test]
+fn test_execute_u32_multiplication() {
+    let source = r#"
+# Unsigned 32-bit multiplication
+@node product_u32
+@params a:u32 b:u32
+@returns u32
+
+  mul %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    // u32 is represented as i32 in WASM
+    let product_u32 = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "product_u32")
+        .expect("product_u32 function not found");
+
+    // Test: 100 * 50 = 5000
+    let result = product_u32.call(&mut store, (100, 50)).expect("call failed");
+    assert_eq!(result, 5000);
+
+    // Test: 0 * 999 = 0
+    let result = product_u32.call(&mut store, (0, 999)).expect("call failed");
+    assert_eq!(result, 0);
+}
+
+#[test]
+fn test_execute_u64_operations() {
+    let source = r#"
+# Unsigned 64-bit addition
+@node sum_u64
+@params a:u64 b:u64
+@returns u64
+
+  add %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    // u64 is represented as i64 in WASM
+    let sum_u64 = instance
+        .get_typed_func::<(i64, i64), i64>(&mut store, "sum_u64")
+        .expect("sum_u64 function not found");
+
+    // Test: 10000000000 + 20000000000 = 30000000000
+    let result = sum_u64
+        .call(&mut store, (10_000_000_000i64, 20_000_000_000i64))
+        .expect("call failed");
+    assert_eq!(result, 30_000_000_000i64);
+}
+
+#[test]
+fn test_execute_char_identity() {
+    let source = r#"
+# Char identity function (char is UTF-32 codepoint, stored as i32)
+@node char_id
+@params c:char
+@returns char
+
+  mov %r c
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    // char is represented as i32 in WASM (UTF-32 codepoint)
+    let char_id = instance
+        .get_typed_func::<i32, i32>(&mut store, "char_id")
+        .expect("char_id function not found");
+
+    // Test: 'A' (65) -> 'A' (65)
+    let result = char_id.call(&mut store, 65).expect("call failed");
+    assert_eq!(result, 65);
+
+    // Test: '한' (U+D55C = 54620) -> '한' (54620)
+    let result = char_id.call(&mut store, 54620).expect("call failed");
+    assert_eq!(result, 54620);
+}
+
+#[test]
+fn test_execute_i8_arithmetic() {
+    // Test i8 addition operation (same-type operands)
+    let source = r#"
+# i8 addition
+@node calc_i8
+@params a:i8 b:i8
+@returns i8
+
+  add %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    // i8 is represented as i32 in WASM
+    let calc_i8 = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "calc_i8")
+        .expect("calc_i8 function not found");
+
+    // Test: 50 + 30 = 80
+    let result = calc_i8.call(&mut store, (50, 30)).expect("call failed");
+    assert_eq!(result, 80);
+
+    // Test: 10 + 5 = 15
+    let result = calc_i8.call(&mut store, (10, 5)).expect("call failed");
+    assert_eq!(result, 15);
+}

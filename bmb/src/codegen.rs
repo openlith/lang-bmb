@@ -686,7 +686,7 @@ impl CodeGenerator {
         ctx: &FunctionContext,
         op: BinaryOp,
     ) -> Result<()> {
-        // Determine type from destination register
+        // Determine type from destination register (for arithmetic operations)
         let dest_type = if let Operand::Register(r) = &stmt.operands[0] {
             ctx.register_types
                 .get(&r.name)
@@ -696,43 +696,74 @@ impl CodeGenerator {
             Type::I32
         };
 
+        // For comparison operations, we need the operand type (not dest_type which is Bool)
+        // Get type from first operand (operands[1])
+        let operand_type = match &stmt.operands[1] {
+            Operand::Register(r) => ctx
+                .register_types
+                .get(&r.name)
+                .cloned()
+                .unwrap_or(Type::I32),
+            Operand::IntLiteral(_) => Type::I32,
+            Operand::FloatLiteral(_) => Type::F64,
+            Operand::Identifier(id) => {
+                // Check if it's a parameter
+                ctx.register_types
+                    .get(&id.name)
+                    .cloned()
+                    .unwrap_or(Type::I32)
+            }
+            _ => Type::I32,
+        };
+
         // Load operands
         self.generate_operand(&stmt.operands[1], func, ctx)?;
         self.generate_operand(&stmt.operands[2], func, ctx)?;
 
         // Apply operation with correct type
+        // Note: 8/16/32-bit types all use i32 operations in WASM
+        // 64-bit types (i64, u64) use i64 operations
+        // For comparisons, use operand_type instead of dest_type (which is Bool)
         let instr = match op {
             BinaryOp::Add => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32Add,
-                Type::I64 => Instruction::I64Add,
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32Add,
+                Type::I64 | Type::U64 => Instruction::I64Add,
                 Type::F32 => Instruction::F32Add,
                 Type::F64 => Instruction::F64Add,
                 _ => Instruction::I32Add, // Compound types use i32 pointer arithmetic
             },
             BinaryOp::Sub => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32Sub,
-                Type::I64 => Instruction::I64Sub,
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32Sub,
+                Type::I64 | Type::U64 => Instruction::I64Sub,
                 Type::F32 => Instruction::F32Sub,
                 Type::F64 => Instruction::F64Sub,
                 _ => Instruction::I32Sub,
             },
             BinaryOp::Mul => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32Mul,
-                Type::I64 => Instruction::I64Mul,
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32Mul,
+                Type::I64 | Type::U64 => Instruction::I64Mul,
                 Type::F32 => Instruction::F32Mul,
                 Type::F64 => Instruction::F64Mul,
                 _ => Instruction::I32Mul,
             },
             BinaryOp::Div => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32DivS,
+                // Signed division for signed types
+                Type::I8 | Type::I16 | Type::I32 => Instruction::I32DivS,
                 Type::I64 => Instruction::I64DivS,
+                // Unsigned division for unsigned types
+                Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32DivU,
+                Type::U64 => Instruction::I64DivU,
                 Type::F32 => Instruction::F32Div,
                 Type::F64 => Instruction::F64Div,
                 _ => Instruction::I32DivS,
             },
             BinaryOp::Mod => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32RemS,
+                // Signed remainder for signed types
+                Type::I8 | Type::I16 | Type::I32 => Instruction::I32RemS,
                 Type::I64 => Instruction::I64RemS,
+                // Unsigned remainder for unsigned types
+                Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32RemU,
+                Type::U64 => Instruction::I64RemU,
                 // Float mod: a % b = a - (b * floor(a / b))
                 // For simplicity, we don't support float mod directly
                 Type::F32 | Type::F64 => {
@@ -744,8 +775,8 @@ impl CodeGenerator {
             },
             // Bitwise operations (integer only)
             BinaryOp::And => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32And,
-                Type::I64 => Instruction::I64And,
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32And,
+                Type::I64 | Type::U64 => Instruction::I64And,
                 Type::F32 | Type::F64 => {
                     return Err(BmbError::CodegenError {
                         message: "Bitwise AND not supported for floating point types".to_string(),
@@ -754,8 +785,8 @@ impl CodeGenerator {
                 _ => Instruction::I32And,
             },
             BinaryOp::Or => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32Or,
-                Type::I64 => Instruction::I64Or,
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32Or,
+                Type::I64 | Type::U64 => Instruction::I64Or,
                 Type::F32 | Type::F64 => {
                     return Err(BmbError::CodegenError {
                         message: "Bitwise OR not supported for floating point types".to_string(),
@@ -764,8 +795,8 @@ impl CodeGenerator {
                 _ => Instruction::I32Or,
             },
             BinaryOp::Xor => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32Xor,
-                Type::I64 => Instruction::I64Xor,
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32Xor,
+                Type::I64 | Type::U64 => Instruction::I64Xor,
                 Type::F32 | Type::F64 => {
                     return Err(BmbError::CodegenError {
                         message: "Bitwise XOR not supported for floating point types".to_string(),
@@ -774,8 +805,8 @@ impl CodeGenerator {
                 _ => Instruction::I32Xor,
             },
             BinaryOp::Shl => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32Shl,
-                Type::I64 => Instruction::I64Shl,
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32Shl,
+                Type::I64 | Type::U64 => Instruction::I64Shl,
                 Type::F32 | Type::F64 => {
                     return Err(BmbError::CodegenError {
                         message: "Shift left not supported for floating point types".to_string(),
@@ -784,8 +815,12 @@ impl CodeGenerator {
                 _ => Instruction::I32Shl,
             },
             BinaryOp::Shr => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32ShrS, // Signed shift right
+                // Signed shift for signed types
+                Type::I8 | Type::I16 | Type::I32 => Instruction::I32ShrS,
                 Type::I64 => Instruction::I64ShrS,
+                // Unsigned shift for unsigned types
+                Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32ShrU,
+                Type::U64 => Instruction::I64ShrU,
                 Type::F32 | Type::F64 => {
                     return Err(BmbError::CodegenError {
                         message: "Shift right not supported for floating point types".to_string(),
@@ -793,45 +828,56 @@ impl CodeGenerator {
                 }
                 _ => Instruction::I32ShrS,
             },
-            // Comparisons return i32 (bool)
-            BinaryOp::Eq => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32Eq,
-                Type::I64 => Instruction::I64Eq,
+            // Comparisons return i32 (bool) but instruction selection uses operand_type
+            // Note: Eq/Ne are signedness-agnostic, Lt/Le/Gt/Ge need signed/unsigned variants
+            BinaryOp::Eq => match operand_type {
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32Eq,
+                Type::I64 | Type::U64 => Instruction::I64Eq,
                 Type::F32 => Instruction::F32Eq,
                 Type::F64 => Instruction::F64Eq,
                 _ => Instruction::I32Eq,
             },
-            BinaryOp::Ne => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32Ne,
-                Type::I64 => Instruction::I64Ne,
+            BinaryOp::Ne => match operand_type {
+                Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32Ne,
+                Type::I64 | Type::U64 => Instruction::I64Ne,
                 Type::F32 => Instruction::F32Ne,
                 Type::F64 => Instruction::F64Ne,
                 _ => Instruction::I32Ne,
             },
-            BinaryOp::Lt => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32LtS,
+            BinaryOp::Lt => match operand_type {
+                // Signed comparisons for signed types
+                Type::I8 | Type::I16 | Type::I32 => Instruction::I32LtS,
                 Type::I64 => Instruction::I64LtS,
+                // Unsigned comparisons for unsigned types
+                Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32LtU,
+                Type::U64 => Instruction::I64LtU,
                 Type::F32 => Instruction::F32Lt,
                 Type::F64 => Instruction::F64Lt,
                 _ => Instruction::I32LtS,
             },
-            BinaryOp::Le => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32LeS,
+            BinaryOp::Le => match operand_type {
+                Type::I8 | Type::I16 | Type::I32 => Instruction::I32LeS,
                 Type::I64 => Instruction::I64LeS,
+                Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32LeU,
+                Type::U64 => Instruction::I64LeU,
                 Type::F32 => Instruction::F32Le,
                 Type::F64 => Instruction::F64Le,
                 _ => Instruction::I32LeS,
             },
-            BinaryOp::Gt => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32GtS,
+            BinaryOp::Gt => match operand_type {
+                Type::I8 | Type::I16 | Type::I32 => Instruction::I32GtS,
                 Type::I64 => Instruction::I64GtS,
+                Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32GtU,
+                Type::U64 => Instruction::I64GtU,
                 Type::F32 => Instruction::F32Gt,
                 Type::F64 => Instruction::F64Gt,
                 _ => Instruction::I32GtS,
             },
-            BinaryOp::Ge => match dest_type {
-                Type::I32 | Type::Bool => Instruction::I32GeS,
+            BinaryOp::Ge => match operand_type {
+                Type::I8 | Type::I16 | Type::I32 => Instruction::I32GeS,
                 Type::I64 => Instruction::I64GeS,
+                Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => Instruction::I32GeU,
+                Type::U64 => Instruction::I64GeU,
                 Type::F32 => Instruction::F32Ge,
                 Type::F64 => Instruction::F64Ge,
                 _ => Instruction::I32GeS,
@@ -872,12 +918,13 @@ impl CodeGenerator {
         self.generate_operand(&stmt.operands[1], func, ctx)?;
 
         // Apply NOT using XOR with -1 (all bits set)
+        // 8/16/32-bit types use i32, 64-bit types use i64
         match dest_type {
-            Type::I32 | Type::Bool => {
+            Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => {
                 func.instruction(&Instruction::I32Const(-1));
                 func.instruction(&Instruction::I32Xor);
             }
-            Type::I64 => {
+            Type::I64 | Type::U64 => {
                 func.instruction(&Instruction::I64Const(-1));
                 func.instruction(&Instruction::I64Xor);
             }
