@@ -1370,3 +1370,134 @@ fn test_requires_multiple_contracts() {
     let result = safe_add.call(&mut store, (100, 50));
     assert!(result.is_err(), "Should trap when a >= 100");
 }
+
+// ============================================================================
+// @pure Purity Verification Tests
+// ============================================================================
+
+#[test]
+fn test_pure_function_valid() {
+    // A valid @pure function with only pure operations
+    let source = r#"
+@node double
+@params x:i32
+@returns i32
+@pure
+
+  add %r x x
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let double = instance
+        .get_typed_func::<i32, i32>(&mut store, "double")
+        .expect("double function not found");
+
+    let result = double.call(&mut store, 21).expect("call failed");
+    assert_eq!(result, 42);
+}
+
+#[test]
+fn test_pure_calling_pure_valid() {
+    // A @pure function can call another @pure function
+    let source = r#"
+@node double
+@params x:i32
+@returns i32
+@pure
+
+  add %r x x
+  ret %r
+
+@node quadruple
+@params x:i32
+@returns i32
+@pure
+
+  call %tmp double x
+  call %r double %tmp
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let quadruple = instance
+        .get_typed_func::<i32, i32>(&mut store, "quadruple")
+        .expect("quadruple function not found");
+
+    let result = quadruple.call(&mut store, 10).expect("call failed");
+    assert_eq!(result, 40);
+}
+
+#[test]
+fn test_pure_calling_impure_fails() {
+    // A @pure function cannot call a non-@pure function
+    let source = r#"
+@node impure_double
+@params x:i32
+@returns i32
+
+  add %r x x
+  ret %r
+
+@node pure_caller
+@params x:i32
+@returns i32
+@pure
+
+  call %r impure_double x
+  ret %r
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let result = contracts::verify(&typed);
+
+    assert!(result.is_err(), "Should fail: @pure calls impure function");
+    let err = result.unwrap_err();
+    let msg = format!("{}", err);
+    assert!(
+        msg.contains("Purity violation") && msg.contains("impure_double"),
+        "Error should mention purity violation and impure function: {}",
+        msg
+    );
+}
+
+#[test]
+fn test_pure_with_print_fails() {
+    // A @pure function cannot use print (I/O)
+    let source = r#"
+@node log_and_double
+@params x:i32
+@returns i32
+@pure
+
+  print "doubling"
+  add %r x x
+  ret %r
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let result = contracts::verify(&typed);
+
+    assert!(result.is_err(), "Should fail: @pure uses print");
+    let err = result.unwrap_err();
+    let msg = format!("{}", err);
+    assert!(
+        msg.contains("Purity violation") && msg.contains("print"),
+        "Error should mention purity violation and print: {}",
+        msg
+    );
+}

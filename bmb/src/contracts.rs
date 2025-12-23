@@ -18,9 +18,9 @@
 //! @requires positive(x)  # Expands to @pre x > 0
 //! ```
 
-use wasm_encoder::{BlockType, Function, Instruction, ValType};
+use wasm_encoder::{BlockType, Function, Instruction as WasmInstruction, ValType};
 
-use crate::ast::{BinaryOp, ContractDef, Expr, Node, Type, UnaryOp};
+use crate::ast::{BinaryOp, ContractDef, Expr, Instruction, Node, Opcode, Operand, Type, UnaryOp};
 use crate::types::TypedProgram;
 use crate::BmbError;
 use crate::Result;
@@ -196,11 +196,115 @@ pub fn verify(program: &TypedProgram) -> Result<VerifiedProgram> {
         for assertion in &node.assertions {
             validate_contract_expr(&assertion.condition, "assertion", &node.name.name)?;
         }
+
+        // Verify purity constraints if @pure is declared
+        if node.pure {
+            verify_purity(node, &program.nodes)?;
+        }
     }
 
     Ok(VerifiedProgram {
         program: program.clone(),
     })
+}
+
+/// Verify purity constraints for a @pure function
+///
+/// A pure function cannot:
+/// - Use `xcall` (external calls are inherently impure)
+/// - Use `print` (I/O is impure)
+/// - Call another function that is not marked @pure
+///
+/// # Arguments
+///
+/// * `node` - The node to verify purity for
+/// * `all_nodes` - All nodes in the program (for checking called function purity)
+///
+/// # Returns
+///
+/// Ok(()) if the function satisfies purity constraints, or an error describing the violation
+fn verify_purity(
+    node: &Node,
+    all_nodes: &[crate::types::TypedNode],
+) -> Result<()> {
+    for instr in &node.body {
+        // Only process statements, not labels
+        let stmt = match instr {
+            Instruction::Statement(stmt) => stmt,
+            Instruction::Label(_) => continue,
+        };
+
+        match &stmt.opcode {
+            // External calls are inherently impure (I/O, FFI, etc.)
+            Opcode::Xcall => {
+                return Err(BmbError::ContractError {
+                    message: format!(
+                        "Purity violation in '{}': xcall is not allowed in @pure functions. \
+                         External calls are inherently impure.",
+                        node.name.name
+                    ),
+                });
+            }
+
+            // Print is I/O - impure
+            Opcode::Print => {
+                return Err(BmbError::ContractError {
+                    message: format!(
+                        "Purity violation in '{}': print is not allowed in @pure functions. \
+                         I/O operations violate purity.",
+                        node.name.name
+                    ),
+                });
+            }
+
+            // Call to another function - must check if target is also pure
+            Opcode::Call => {
+                // Extract the function name from the first operand (after destination register)
+                // call %dest func args... - function name is the second operand
+                let func_name = stmt.operands.iter().find_map(|op| match op {
+                    Operand::Identifier(id) => Some(id.name.as_str()),
+                    Operand::QualifiedIdent { name, .. } => Some(name.name.as_str()),
+                    _ => None,
+                });
+
+                if let Some(func_name) = func_name {
+                    // Find the called function in all nodes
+                    let called_node = all_nodes.iter().find(|n| n.node.name.name == func_name);
+
+                    match called_node {
+                        Some(called) if !called.node.pure => {
+                            return Err(BmbError::ContractError {
+                                message: format!(
+                                    "Purity violation in '{}': calls impure function '{}'. \
+                                     A @pure function can only call other @pure functions.",
+                                    node.name.name, func_name
+                                ),
+                            });
+                        }
+                        None => {
+                            // Function not found in program nodes - might be imported
+                            // Imported functions are considered impure by default
+                            return Err(BmbError::ContractError {
+                                message: format!(
+                                    "Purity violation in '{}': calls unknown function '{}'. \
+                                     External/imported functions are considered impure.",
+                                    node.name.name, func_name
+                                ),
+                            });
+                        }
+                        _ => {
+                            // Called function is also pure - OK
+                        }
+                    }
+                }
+            }
+
+            // All other opcodes are pure (arithmetic, comparison, control flow, mov)
+            _ => {}
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_contract_expr(expr: &Expr, _contract_type: &str, _function_name: &str) -> Result<()> {
@@ -283,10 +387,10 @@ impl<'a> ContractCodeGenerator<'a> {
         self.generate_expr(expr, func);
 
         // If condition is false (0), trap
-        func.instruction(&Instruction::I32Eqz);
-        func.instruction(&Instruction::If(BlockType::Empty));
-        func.instruction(&Instruction::Unreachable);
-        func.instruction(&Instruction::End);
+        func.instruction(&WasmInstruction::I32Eqz);
+        func.instruction(&WasmInstruction::If(BlockType::Empty));
+        func.instruction(&WasmInstruction::Unreachable);
+        func.instruction(&WasmInstruction::End);
     }
 
     /// Generate postcondition check instructions
@@ -309,10 +413,10 @@ impl<'a> ContractCodeGenerator<'a> {
         self.generate_expr(expr, func);
 
         // If condition is false (0), trap
-        func.instruction(&Instruction::I32Eqz);
-        func.instruction(&Instruction::If(BlockType::Empty));
-        func.instruction(&Instruction::Unreachable);
-        func.instruction(&Instruction::End);
+        func.instruction(&WasmInstruction::I32Eqz);
+        func.instruction(&WasmInstruction::If(BlockType::Empty));
+        func.instruction(&WasmInstruction::Unreachable);
+        func.instruction(&WasmInstruction::End);
     }
 
     /// Generate assertion check instructions
@@ -338,10 +442,10 @@ impl<'a> ContractCodeGenerator<'a> {
         self.generate_expr(expr, func);
 
         // If condition is false (0), trap
-        func.instruction(&Instruction::I32Eqz);
-        func.instruction(&Instruction::If(BlockType::Empty));
-        func.instruction(&Instruction::Unreachable);
-        func.instruction(&Instruction::End);
+        func.instruction(&WasmInstruction::I32Eqz);
+        func.instruction(&WasmInstruction::If(BlockType::Empty));
+        func.instruction(&WasmInstruction::Unreachable);
+        func.instruction(&WasmInstruction::End);
     }
 
     /// Determine the unified type for a binary expression
@@ -376,23 +480,23 @@ impl<'a> ContractCodeGenerator<'a> {
             Expr::IntLit(v) => {
                 // Generate literal with target type if specified
                 match target_type {
-                    Some(Type::I64) => func.instruction(&Instruction::I64Const(*v)),
-                    _ => func.instruction(&Instruction::I32Const(*v as i32)),
+                    Some(Type::I64) => func.instruction(&WasmInstruction::I64Const(*v)),
+                    _ => func.instruction(&WasmInstruction::I32Const(*v as i32)),
                 };
             }
             Expr::FloatLit(v) => {
                 // Generate literal with target type if specified
                 match target_type {
-                    Some(Type::F32) => func.instruction(&Instruction::F32Const(*v as f32)),
-                    _ => func.instruction(&Instruction::F64Const(*v)),
+                    Some(Type::F32) => func.instruction(&WasmInstruction::F32Const(*v as f32)),
+                    _ => func.instruction(&WasmInstruction::F64Const(*v)),
                 };
             }
             Expr::BoolLit(b) => {
-                func.instruction(&Instruction::I32Const(if *b { 1 } else { 0 }));
+                func.instruction(&WasmInstruction::I32Const(if *b { 1 } else { 0 }));
             }
             Expr::Var(name) => {
                 if let Some(&idx) = self.locals.get(&name.name) {
-                    func.instruction(&Instruction::LocalGet(idx));
+                    func.instruction(&WasmInstruction::LocalGet(idx));
                     // Handle type promotion if needed
                     if let Some(target) = target_type {
                         let actual_type = self.types.get(&name.name).cloned().unwrap_or(Type::I32);
@@ -403,7 +507,7 @@ impl<'a> ContractCodeGenerator<'a> {
             Expr::Ret => {
                 // Load the return value from result_local
                 if let Some(idx) = self.result_local {
-                    func.instruction(&Instruction::LocalGet(idx));
+                    func.instruction(&WasmInstruction::LocalGet(idx));
                     // Handle type promotion if needed
                     if let Some(target) = target_type {
                         self.maybe_convert_type(&self.return_type, target, func);
@@ -421,82 +525,82 @@ impl<'a> ContractCodeGenerator<'a> {
                 // Generate operation
                 let instr = match op {
                     BinaryOp::Add => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32Add,
-                        Type::I64 => Instruction::I64Add,
-                        Type::F32 => Instruction::F32Add,
-                        Type::F64 => Instruction::F64Add,
-                        _ => Instruction::I32Add, // Compound types use i32 pointer arithmetic
+                        Type::I32 | Type::Bool => WasmInstruction::I32Add,
+                        Type::I64 => WasmInstruction::I64Add,
+                        Type::F32 => WasmInstruction::F32Add,
+                        Type::F64 => WasmInstruction::F64Add,
+                        _ => WasmInstruction::I32Add, // Compound types use i32 pointer arithmetic
                     },
                     BinaryOp::Sub => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32Sub,
-                        Type::I64 => Instruction::I64Sub,
-                        Type::F32 => Instruction::F32Sub,
-                        Type::F64 => Instruction::F64Sub,
-                        _ => Instruction::I32Sub,
+                        Type::I32 | Type::Bool => WasmInstruction::I32Sub,
+                        Type::I64 => WasmInstruction::I64Sub,
+                        Type::F32 => WasmInstruction::F32Sub,
+                        Type::F64 => WasmInstruction::F64Sub,
+                        _ => WasmInstruction::I32Sub,
                     },
                     BinaryOp::Mul => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32Mul,
-                        Type::I64 => Instruction::I64Mul,
-                        Type::F32 => Instruction::F32Mul,
-                        Type::F64 => Instruction::F64Mul,
-                        _ => Instruction::I32Mul,
+                        Type::I32 | Type::Bool => WasmInstruction::I32Mul,
+                        Type::I64 => WasmInstruction::I64Mul,
+                        Type::F32 => WasmInstruction::F32Mul,
+                        Type::F64 => WasmInstruction::F64Mul,
+                        _ => WasmInstruction::I32Mul,
                     },
                     BinaryOp::Div => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32DivS,
-                        Type::I64 => Instruction::I64DivS,
-                        Type::F32 => Instruction::F32Div,
-                        Type::F64 => Instruction::F64Div,
-                        _ => Instruction::I32DivS,
+                        Type::I32 | Type::Bool => WasmInstruction::I32DivS,
+                        Type::I64 => WasmInstruction::I64DivS,
+                        Type::F32 => WasmInstruction::F32Div,
+                        Type::F64 => WasmInstruction::F64Div,
+                        _ => WasmInstruction::I32DivS,
                     },
                     BinaryOp::Mod => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32RemS,
-                        Type::I64 => Instruction::I64RemS,
-                        _ => Instruction::I32RemS, // Float mod not directly supported
+                        Type::I32 | Type::Bool => WasmInstruction::I32RemS,
+                        Type::I64 => WasmInstruction::I64RemS,
+                        _ => WasmInstruction::I32RemS, // Float mod not directly supported
                     },
                     BinaryOp::Eq => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32Eq,
-                        Type::I64 => Instruction::I64Eq,
-                        Type::F32 => Instruction::F32Eq,
-                        Type::F64 => Instruction::F64Eq,
-                        _ => Instruction::I32Eq,
+                        Type::I32 | Type::Bool => WasmInstruction::I32Eq,
+                        Type::I64 => WasmInstruction::I64Eq,
+                        Type::F32 => WasmInstruction::F32Eq,
+                        Type::F64 => WasmInstruction::F64Eq,
+                        _ => WasmInstruction::I32Eq,
                     },
                     BinaryOp::Ne => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32Ne,
-                        Type::I64 => Instruction::I64Ne,
-                        Type::F32 => Instruction::F32Ne,
-                        Type::F64 => Instruction::F64Ne,
-                        _ => Instruction::I32Ne,
+                        Type::I32 | Type::Bool => WasmInstruction::I32Ne,
+                        Type::I64 => WasmInstruction::I64Ne,
+                        Type::F32 => WasmInstruction::F32Ne,
+                        Type::F64 => WasmInstruction::F64Ne,
+                        _ => WasmInstruction::I32Ne,
                     },
                     BinaryOp::Lt => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32LtS,
-                        Type::I64 => Instruction::I64LtS,
-                        Type::F32 => Instruction::F32Lt,
-                        Type::F64 => Instruction::F64Lt,
-                        _ => Instruction::I32LtS,
+                        Type::I32 | Type::Bool => WasmInstruction::I32LtS,
+                        Type::I64 => WasmInstruction::I64LtS,
+                        Type::F32 => WasmInstruction::F32Lt,
+                        Type::F64 => WasmInstruction::F64Lt,
+                        _ => WasmInstruction::I32LtS,
                     },
                     BinaryOp::Le => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32LeS,
-                        Type::I64 => Instruction::I64LeS,
-                        Type::F32 => Instruction::F32Le,
-                        Type::F64 => Instruction::F64Le,
-                        _ => Instruction::I32LeS,
+                        Type::I32 | Type::Bool => WasmInstruction::I32LeS,
+                        Type::I64 => WasmInstruction::I64LeS,
+                        Type::F32 => WasmInstruction::F32Le,
+                        Type::F64 => WasmInstruction::F64Le,
+                        _ => WasmInstruction::I32LeS,
                     },
                     BinaryOp::Gt => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32GtS,
-                        Type::I64 => Instruction::I64GtS,
-                        Type::F32 => Instruction::F32Gt,
-                        Type::F64 => Instruction::F64Gt,
-                        _ => Instruction::I32GtS,
+                        Type::I32 | Type::Bool => WasmInstruction::I32GtS,
+                        Type::I64 => WasmInstruction::I64GtS,
+                        Type::F32 => WasmInstruction::F32Gt,
+                        Type::F64 => WasmInstruction::F64Gt,
+                        _ => WasmInstruction::I32GtS,
                     },
                     BinaryOp::Ge => match operand_type {
-                        Type::I32 | Type::Bool => Instruction::I32GeS,
-                        Type::I64 => Instruction::I64GeS,
-                        Type::F32 => Instruction::F32Ge,
-                        Type::F64 => Instruction::F64Ge,
-                        _ => Instruction::I32GeS,
+                        Type::I32 | Type::Bool => WasmInstruction::I32GeS,
+                        Type::I64 => WasmInstruction::I64GeS,
+                        Type::F32 => WasmInstruction::F32Ge,
+                        Type::F64 => WasmInstruction::F64Ge,
+                        _ => WasmInstruction::I32GeS,
                     },
-                    BinaryOp::And => Instruction::I32And,
-                    BinaryOp::Or => Instruction::I32Or,
+                    BinaryOp::And => WasmInstruction::I32And,
+                    BinaryOp::Or => WasmInstruction::I32Or,
                 };
                 func.instruction(&instr);
             }
@@ -508,28 +612,28 @@ impl<'a> ContractCodeGenerator<'a> {
                         match operand_type {
                             Type::I32 | Type::Bool => {
                                 // i32.neg doesn't exist, use i32.const 0; i32.sub
-                                func.instruction(&Instruction::I32Const(0));
+                                func.instruction(&WasmInstruction::I32Const(0));
                                 // Swap and subtract: 0 - x
                                 // Actually we need to generate in reverse order
                             }
                             Type::I64 => {
-                                func.instruction(&Instruction::I64Const(0));
+                                func.instruction(&WasmInstruction::I64Const(0));
                             }
                             Type::F32 => {
-                                func.instruction(&Instruction::F32Neg);
+                                func.instruction(&WasmInstruction::F32Neg);
                             }
                             Type::F64 => {
-                                func.instruction(&Instruction::F64Neg);
+                                func.instruction(&WasmInstruction::F64Neg);
                             }
                             // Compound types fallback to i32
                             _ => {
-                                func.instruction(&Instruction::I32Const(0));
+                                func.instruction(&WasmInstruction::I32Const(0));
                             }
                         }
                     }
                     UnaryOp::Not => {
                         // Logical not: i32.eqz
-                        func.instruction(&Instruction::I32Eqz);
+                        func.instruction(&WasmInstruction::I32Eqz);
                     }
                 }
             }
@@ -557,11 +661,11 @@ impl<'a> ContractCodeGenerator<'a> {
         match (from, to) {
             // i32 -> i64 (extend signed)
             (Type::I32, Type::I64) => {
-                func.instruction(&Instruction::I64ExtendI32S);
+                func.instruction(&WasmInstruction::I64ExtendI32S);
             }
             // f32 -> f64 (promote)
             (Type::F32, Type::F64) => {
-                func.instruction(&Instruction::F64PromoteF32);
+                func.instruction(&WasmInstruction::F64PromoteF32);
             }
             // No other conversions needed for current type system
             _ => {}
