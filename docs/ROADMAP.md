@@ -137,11 +137,13 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ---
 
-## v0.10.0: Memory Safety
+## v0.10.0: Low-Level Safety
 
-**Goal**: Contract-based memory safety without ownership complexity
+**Goal**: Comprehensive memory safety and hardware interaction for bare-metal systems
 
-**Philosophy**: BMB uses **contract-based pointer verification** rather than Rust-style ownership. This maintains "Omission is guessing" principle with explicit, verifiable contracts.
+**Philosophy**: BMB uses **contract-based pointer verification** rather than Rust-style ownership. This maintains "Omission is guessing" principle with explicit, verifiable contracts. As a "Bare-Metal" language, BMB must also support hardware interaction primitives.
+
+### Spatial Pointer Safety
 
 | Task | Priority | Complexity |
 |------|----------|------------|
@@ -152,7 +154,82 @@ v1.0.0: Performance Transcendence Complete 🎯
 | Region-based contracts | High | High |
 | Arena allocator with contracts | Medium | Medium |
 
-**Contract Examples**:
+### Temporal Pointer Safety (Linear Types)
+
+| Task | Priority | Complexity |
+|------|----------|------------|
+| `@consume` annotation | Critical | High |
+| Linear type checking | Critical | High |
+| Use-after-free prevention | Critical | High |
+| Double-free prevention | Critical | Medium |
+| Ownership transfer semantics | High | Medium |
+
+**Linear Type Examples**:
+```bmb
+@node consume_buffer
+@params buf:*u8 @consume    # Linear: must be used exactly once
+@returns void
+@pre valid(buf)
+@post freed(buf)            # Postcondition: buffer is freed
+
+  # buf can only be used once - compiler enforces this
+  call free buf
+  ret
+
+@node transfer_ownership
+@params src:*Resource @consume
+@returns *Resource
+@post valid(ret)
+@post freed(src)            # Old pointer invalidated
+
+  # Ownership transferred - src cannot be used after this
+  ret src
+```
+
+### Hardware Interaction (MMIO)
+
+| Task | Priority | Complexity |
+|------|----------|------------|
+| `@device` region annotation | Critical | Medium |
+| `@volatile` ordering guarantee | Critical | Medium |
+| Memory-mapped I/O support | Critical | High |
+| Interrupt-safe annotations | High | Medium |
+| Hardware register modeling | High | Medium |
+
+**Hardware Interaction Examples**:
+```bmb
+@device UART_BASE 0x40000000    # Memory-mapped UART base address
+@device UART_SIZE 0x100         # UART register region size
+
+@struct UartRegs @volatile      # All fields have volatile semantics
+  data:u8                       # 0x00: Data register
+  status:u8                     # 0x01: Status register
+  control:u8                    # 0x02: Control register
+
+@node uart_write
+@params uart:*UartRegs @device  # Pointer to device memory
+@params byte:u8
+@returns void
+@pre valid_device(uart, UART_BASE, UART_SIZE)
+@pre uart.status & TX_READY != 0
+
+  # Volatile write - cannot be reordered or optimized away
+  store uart.data byte
+  ret
+
+@node uart_read
+@params uart:*UartRegs @device
+@returns u8
+@pre valid_device(uart, UART_BASE, UART_SIZE)
+@pre uart.status & RX_READY != 0
+
+  # Volatile read - always reads from hardware
+  load %byte uart.data
+  ret %byte
+```
+
+### Spatial Safety Contract Examples
+
 ```bmb
 @node safe_deref
 @params ptr:*i32
@@ -181,9 +258,13 @@ v1.0.0: Performance Transcendence Complete 🎯
 | `aligned(ptr, n)` | n-byte aligned | Bronze |
 | `in_bounds(ptr, base, len)` | Within bounds | Silver/Gold |
 | `no_alias(p1, p2)` | No aliasing | Gold |
+| `freed(ptr)` | Pointer has been freed | Gold |
+| `valid_device(ptr, base, size)` | Valid MMIO region | Bronze |
 
 **Success Criteria**:
-- Pointer safety verified through contracts
+- Spatial pointer safety verified through contracts
+- Temporal safety via linear types (@consume)
+- Hardware interaction via @device/@volatile
 - No ownership/borrow complexity
 - Philosophy consistency maintained
 
@@ -191,7 +272,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ## v0.11.0: Diagnostics & Tooling
 
-**Goal**: Actionable error messages with SMT counterexamples
+**Goal**: Actionable error messages, SMT counterexamples, and contract assistance
 
 | Task | Priority | Complexity |
 |------|----------|------------|
@@ -199,10 +280,53 @@ v1.0.0: Performance Transcendence Complete 🎯
 | SMT counterexample visualization | Critical | High |
 | Fix suggestions in errors | High | Medium |
 | IDE integration (LSP enhancements) | High | Medium |
+| **Invariant suggestion mode** | High | Very High |
 | Coverage reporting | Medium | Medium |
 | Performance profiling hooks | Low | Medium |
 
-**Error Format**:
+### Invariant Suggestion Mode
+
+**Philosophy**: Automatic invariant synthesis can conflict with "Omission is guessing". BMB's solution: the compiler **suggests** invariants, but the developer must **confirm** them. This preserves explicit requirements while reducing the verification burden.
+
+**CLI Usage**:
+```bash
+# Suggest invariants for loops without @invariant
+bmbc verify program.bmb --suggest-invariants
+
+# Interactive mode: suggest and prompt for confirmation
+bmbc verify program.bmb --suggest-invariants --interactive
+
+# Output suggested invariants to file for review
+bmbc verify program.bmb --suggest-invariants --output suggestions.bmb
+```
+
+**Suggestion Output Format**:
+```
+info[I301]: Loop invariant suggestion
+  --> src/sum.bmb:15:1
+   |
+15 | _loop:
+   |  ^^^^^ No @invariant specified
+   |
+   = Suggested invariants (review and add explicitly):
+     @invariant _loop %i >= 0
+     @invariant _loop %i <= len
+     @invariant _loop %sum >= 0
+
+   = To apply: Add these to your source file after @params/@returns
+   = Note: Suggestions are heuristic - verify they match your intent
+```
+
+**Supported Heuristics**:
+| Pattern | Suggested Invariant |
+|---------|---------------------|
+| Counter `%i` with `lt %cond %i N` | `%i >= 0 && %i <= N` |
+| Accumulator `add %sum %sum %x` | `%sum >= 0` (if inputs positive) |
+| Array index in bounds check | `%idx < len` |
+| Decreasing counter | `%i >= 0` (termination) |
+
+### Error Format
+
 ```
 error[E202]: Postcondition violation
   --> src/math.bmb:15:1
@@ -219,6 +343,8 @@ error[E202]: Postcondition violation
 **Success Criteria**:
 - Every error includes actionable suggestion
 - SMT failures show concrete counterexamples
+- Invariant suggestion mode helps users write correct contracts
+- Suggestions require explicit confirmation (no implicit contracts)
 
 ---
 
@@ -698,6 +824,7 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 7.1 | 2025-12-23 | v0.10.0 expanded to "Low-Level Safety": @consume, @device, @volatile; v0.11.0 adds invariant suggestion mode |
 | 7.0 | 2025-12-23 | v0.7.0 complete: @requires chaining, @pure verification, @invariant runtime checks |
 | 6.0 | 2025-12-23 | Version restructure: v1.0.0 = Performance Transcendence, all prior stages v0.x |
 | 5.0 | 2025-12-23 | Performance Transcendence Roadmap (Bronze/Silver/Gold stages, research-backed) |
