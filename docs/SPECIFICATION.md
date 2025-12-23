@@ -1,6 +1,6 @@
 # BMB - Bare-Metal-Banter Specification
 
-**Version:** 0.7.0-draft
+**Version:** 0.7.1-draft
 
 ---
 
@@ -415,19 +415,68 @@ BMB는 편의 문법 없이 문자열을 명시적으로 표현합니다:
 # 문자 리터럴
 mov %c 'A'           # char = 65 (ASCII)
 mov %c '한'          # char = 54620 (Unicode)
-
-# 바이트 문자열 (data segment)
-@data hello "Hello"  # [u8; 5] in memory
 ```
+
+#### Data Segments (정적 데이터)
+
+문자열 및 상수 데이터는 `@data` 지시어로 정적 메모리에 할당합니다:
+
+```bmb
+# 정적 데이터 정의
+@data hello "Hello, World!"    # [u8; 13] in read-only data segment
+@data magic_bytes [0xDE, 0xAD, 0xBE, 0xEF]  # [u8; 4]
+
+@node greet
+@params void
+@returns *u8
+
+  mov %ptr @hello              # 정적 데이터 주소 참조
+  ret %ptr
+```
+
+| 형식 | 설명 | 메모리 위치 |
+| --- | --- | --- |
+| `@data name "string"` | UTF-8 문자열 | Read-only data segment |
+| `@data name [bytes]` | 바이트 배열 | Read-only data segment |
+| `mov %r @name` | 데이터 주소 로드 | 컴파일 타임 결정 |
+
+**중요**: `@data`로 정의된 데이터는 불변(immutable)이며, 수정 시도는 런타임 트랩을 발생시킵니다.
 
 ### 4.6 Instruction Set Architecture (ISA)
 
 | Category | Opcodes |
 | --- | --- |
 | Arithmetic | `add`, `sub`, `mul`, `div`, `mod` |
+| Bitwise | `and`, `or`, `xor`, `shl`, `shr`, `not` |
 | Comparison | `eq`, `ne`, `lt`, `le`, `gt`, `ge` |
 | Control Flow | `ret`, `jmp`, `jif`, `call` |
 | Memory | `mov`, `load`, `store` |
+
+#### Bitwise Operations
+
+시스템 프로그래밍에 필수적인 비트 연산을 지원합니다:
+
+```bmb
+@node extract_byte
+@params value:u32 position:u32
+@returns u8
+@pre position < 4
+@post ret <= 255
+
+  mul %shift position 8       # position * 8
+  shr %shifted value %shift   # value >> shift
+  and %result %shifted 0xFF   # mask to byte
+  ret %result
+```
+
+| Opcode | Operation | Example |
+| --- | --- | --- |
+| `and` | Bitwise AND | `and %r a b` → `a & b` |
+| `or` | Bitwise OR | `or %r a b` → `a \| b` |
+| `xor` | Bitwise XOR | `xor %r a b` → `a ^ b` |
+| `shl` | Shift left | `shl %r a n` → `a << n` |
+| `shr` | Shift right | `shr %r a n` → `a >> n` |
+| `not` | Bitwise NOT | `not %r a` → `~a` |
 
 ### 4.7 Operand Syntax
 
@@ -558,6 +607,27 @@ Traditional Object-Oriented Programming exists to help humans manage complexity 
 
 Any function receiving a `User` or `BankAccount` can assume these constraints hold—they are enforced at construction time.
 
+#### Constraint Timing (검사 시점)
+
+구조체 제약 조건의 검사 시점을 명시할 수 있습니다:
+
+```bmb
+@struct Counter
+  value:u32
+  max:u32
+  @constraint(on_create) max > 0              # 생성 시에만 검사
+  @constraint(on_mutate) value <= max         # 필드 변경 시마다 검사
+  @constraint(always) value >= 0              # 항상 검사 (기본값)
+```
+
+| 시점 | 검사 타이밍 | 용도 |
+| --- | --- | --- |
+| `on_create` | 구조체 생성 시 1회 | 초기화 조건 |
+| `on_mutate` | 필드 수정 직후 | 상태 불변량 |
+| `always` | 생성 + 수정 (기본값) | 일반 불변량 |
+
+**참고**: `on_mutate`는 해당 필드가 `@mut`로 선언된 경우에만 의미가 있습니다.
+
 ### 7.3 Contract Chaining (Replaces Inheritance)
 
 Instead of inheriting behavior, BMB chains contracts:
@@ -665,7 +735,57 @@ BMB functions must handle all valid inputs. Invalid inputs are rejected at the c
 
 BMB is designed to eliminate entire categories of software defects by construction. This section maps common programming errors to BMB's prevention mechanisms.
 
-### 8.1 Defect Categories and Prevention
+### 8.1 Contract-Based Pointer Safety
+
+BMB는 소유권 모델(Rust) 대신 **계약 기반 포인터 검증**을 사용합니다. 이는 "Omission is guessing" 철학과 일관성을 유지하면서 메모리 안전성을 제공합니다.
+
+#### Pointer Contracts
+
+```bmb
+@node safe_deref
+@params ptr:*i32
+@returns i32
+@pre valid(ptr)              # 포인터 유효성
+@pre aligned(ptr, 4)         # 정렬 요구사항
+@pre not_null(ptr)           # null 아님
+@post true
+
+  load %value ptr 0
+  ret %value
+```
+
+#### Built-in Pointer Predicates
+
+| Predicate | 의미 | 검증 수준 |
+| --- | --- | --- |
+| `valid(ptr)` | 할당된 메모리 가리킴 | Silver/Gold |
+| `not_null(ptr)` | null이 아님 | Bronze |
+| `aligned(ptr, n)` | n바이트 정렬됨 | Bronze |
+| `in_bounds(ptr, base, len)` | 범위 내 포인터 | Silver/Gold |
+| `no_alias(ptr1, ptr2)` | 에일리어싱 없음 | Gold |
+
+#### Memory Region Contracts (v0.10 계획)
+
+```bmb
+@node process_buffer
+@params buf:*u8 len:u32
+@returns void
+@pre valid_region(buf, len)           # buf[0..len] 유효
+@pre no_alias_region(buf, len, other) # 다른 영역과 겹치지 않음
+@post true
+
+  # Safe buffer operations
+```
+
+#### Philosophy Alignment
+
+| 접근법 | BMB 적합성 | 이유 |
+| --- | --- | --- |
+| Rust 소유권 | ❌ | 암시적 규칙, 학습곡선 |
+| Linear Types | ⚠️ 부분 | 유연성 부족 |
+| **Contract-based** | ✅ | 명시적, 검증 가능, 기존 시스템과 일관 |
+
+### 8.2 Defect Categories and Prevention
 
 #### Category 1: Structural Redundancy
 
@@ -710,7 +830,7 @@ BMB is designed to eliminate entire categories of software defects by constructi
 | Swallowed exceptions | Silent error handling | Total functions, no exceptions |
 | Undocumented assumptions | Implicit developer beliefs | Contracts make assumptions explicit |
 
-### 8.2 Verification Level Coverage
+### 8.3 Verification Level Coverage
 
 | Defect Category | Stone (0) | Bronze (1) | Silver (2) | Gold (3) |
 | --- | --- | --- | --- | --- |
@@ -718,8 +838,35 @@ BMB is designed to eliminate entire categories of software defects by constructi
 | Type mismatches | ❌ | ✅ | ✅ | ✅ |
 | Null references | ❌ | ✅ | ✅ | ✅ |
 | Contract violations | ❌ | ❌ | Runtime | Static |
+| Pointer safety | ❌ | ❌ | Runtime | Static |
 | Termination | ❌ | ❌ | ❌ | ✅ |
 | Purity violations | ❌ | ❌ | ❌ | ✅ |
+
+### 8.4 Error Handling Strategy (v0.9 계획)
+
+BMB는 Total Function을 지향하지만, 하드웨어 결함이나 OOM은 `@pre`로 방지할 수 없습니다:
+
+```bmb
+# Result 타입 (v0.9 계획)
+@struct Result[T, E]
+  tag:u8           # 0 = Ok, 1 = Err
+  ok:T
+  err:E
+
+@node try_allocate
+@params size:u64
+@returns Result[*u8, AllocError]
+@pre size > 0
+@post ret.tag == 0 || ret.tag == 1
+
+  # allocation logic...
+```
+
+| 에러 유형 | 현재 처리 | v0.9 계획 |
+| --- | --- | --- |
+| 논리 에러 | `@pre` 위반 → trap | 유지 |
+| 리소스 실패 | trap | `Result[T, E]` |
+| 하드웨어 결함 | trap | Trap + 상태 복구 계약 |
 
 ---
 
@@ -864,17 +1011,20 @@ DIRECTIVES (@)           CONTRACTS               VERIFICATION
 @tags / @#              @pure / @!
 @test / @?              @requires / @&
 @file                   @assert / @!!
+@data                   @constraint
 
 REGISTERS (%)           TYPES                   OPCODES
 ─────────────────       ─────────────────       ─────────────────
-%name                   i8-i64, u8-u64          add sub mul div mod
-%result                 f32, f64                eq ne lt le gt ge
-%temp                   bool, char              ret jmp jif call
-                        [T; N], &T, *T          mov load store
-
-LABELS (_)
-─────────────────
-_name:
-_loop:
-_exit:
+%name                   i8-i64, u8-u64          Arithmetic: add sub mul div mod
+%result                 f32, f64                Bitwise: and or xor shl shr not
+%temp                   bool, char              Compare: eq ne lt le gt ge
+                        [T; N], &T, *T          Control: ret jmp jif call
+                                                Memory: mov load store
+LABELS (_)              POINTER PREDICATES
+─────────────────       ─────────────────
+_name:                  valid(ptr)
+_loop:                  not_null(ptr)
+_exit:                  aligned(ptr, n)
+                        in_bounds(ptr, base, len)
+                        no_alias(ptr1, ptr2)
 ```

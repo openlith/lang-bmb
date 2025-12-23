@@ -38,17 +38,20 @@ This roadmap follows BMB's core principle: **no shortcuts, no guessing**. Each v
 
 | Task | Priority | Status |
 |------|----------|--------|
-| `@variant` termination proof | Critical | Planned |
-| `@pure` side-effect annotation | Critical | Planned |
-| `@requires` contract chaining | High | Planned |
+| `@variant` termination proof (grammar/AST/parser) | Critical | ✅ Done |
+| `@pure` side-effect annotation (grammar/AST/parser) | Critical | ✅ Done |
+| `@requires` contract chaining (grammar/AST/parser) | High | ✅ Done |
 | `@contract` named contract definitions | High | Planned |
-| `@constraint` in @struct | High | Planned |
-| Loop invariant support in parser/verifier | Critical | Planned |
+| `@constraint` timing (on_create/on_mutate) | High | ✅ Spec |
+| Bitwise ISA (and/or/xor/shl/shr/not) | High | ✅ Spec |
+| Loop invariant support in verifier | Critical | Planned |
+| Verification logic for new contracts | Critical | Planned |
 
 **Success Criteria**:
 - `@variant` proves termination for recursive functions
 - `@pure` functions verified for referential transparency
 - Contract chaining works with `@requires`
+- Bitwise operations available for systems programming
 
 ---
 
@@ -121,38 +124,55 @@ This roadmap follows BMB's core principle: **no shortcuts, no guessing**. Each v
 
 ---
 
-## v0.10.0: Memory Management
+## v0.10.0: Memory Safety
 
-**Goal**: Safe memory patterns without garbage collection
+**Goal**: Contract-based memory safety without ownership complexity
+
+**Philosophy**: BMB uses **contract-based pointer verification** rather than Rust-style ownership. This maintains "Omission is guessing" principle with explicit, verifiable contracts.
 
 | Task | Priority | Complexity |
 |------|----------|------------|
-| Region-based allocation | Critical | Very High |
-| Arena allocator | High | High |
-| Ownership annotations | Critical | Very High |
-| Borrow checking (simplified) | High | Very High |
-| `@owns` and `@borrows` contracts | High | High |
-| Stack allocation optimization | Medium | Medium |
+| Pointer predicate builtins | Critical | High |
+| `valid(ptr)` - allocation check | Critical | High |
+| `no_alias(ptr1, ptr2)` - aliasing check | Critical | Very High |
+| `in_bounds(ptr, base, len)` - bounds | High | Medium |
+| Region-based contracts | High | High |
+| Arena allocator with contracts | Medium | Medium |
 
 **Contract Examples**:
 ```bmb
-@node with_arena
-@params size:u64
-@returns Arena
-@owns ret                              # Caller owns returned arena
-@post arena_capacity(ret) >= size
+@node safe_deref
+@params ptr:*i32
+@returns i32
+@pre valid(ptr)                        # Pointer validity contract
+@pre aligned(ptr, 4)                   # Alignment contract
+@pre not_null(ptr)                     # Null check contract
+@post true
 
-@node arena_alloc
-@params arena:&Arena size:u64
-@returns *u8
-@borrows arena                         # Borrows, doesn't own
-@pre arena_remaining(arena) >= size
-@post ret != null
+  load %value ptr 0
+  ret %value
+
+@node process_buffer
+@params buf:*u8 len:u32
+@returns void
+@pre valid_region(buf, len)            # Region validity
+@pre no_alias_region(buf, len, other)  # No aliasing
+@post true
 ```
 
+**Built-in Predicates**:
+| Predicate | Description | Verification Level |
+|-----------|-------------|-------------------|
+| `valid(ptr)` | Points to allocated memory | Silver/Gold |
+| `not_null(ptr)` | Not null | Bronze |
+| `aligned(ptr, n)` | n-byte aligned | Bronze |
+| `in_bounds(ptr, base, len)` | Within bounds | Silver/Gold |
+| `no_alias(p1, p2)` | No aliasing | Gold |
+
 **Success Criteria**:
-- Memory leaks detectable at compile time
-- Use-after-free impossible by construction
+- Pointer safety verified through contracts
+- No ownership/borrow complexity
+- Philosophy consistency maintained
 
 ---
 
