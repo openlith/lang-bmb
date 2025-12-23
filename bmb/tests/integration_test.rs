@@ -1501,3 +1501,78 @@ fn test_pure_with_print_fails() {
         msg
     );
 }
+
+// ============================================================================
+// @invariant Loop Invariant Verification Tests
+// ============================================================================
+
+#[test]
+fn test_invariant_loop_valid() {
+    // A loop with a valid invariant that holds throughout execution
+    // Pattern: do work, check condition, jump back if true
+    let source = r#"
+@node count_up
+@params limit:i32
+@returns i32
+@invariant _loop count >= 0
+
+  mov %count 0
+_loop:
+  add %count %count 1
+  lt %continue %count limit
+  jif %continue _loop
+  ret %count
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let count_up = instance
+        .get_typed_func::<i32, i32>(&mut store, "count_up")
+        .expect("count_up function not found");
+
+    // count from 0 to 10
+    let result = count_up.call(&mut store, 10).expect("call failed");
+    assert_eq!(result, 10);
+}
+
+#[test]
+fn test_invariant_violation_traps() {
+    // A loop where invariant is violated at entry when start < 0
+    let source = r#"
+@node count_from
+@params start:i32 limit:i32
+@returns i32
+@invariant _loop count >= 0
+
+  mov %count start
+_loop:
+  add %count %count 1
+  lt %continue %count limit
+  jif %continue _loop
+  ret %count
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let count_from = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "count_from")
+        .expect("count_from function not found");
+
+    // Valid: start=0, invariant count >= 0 holds
+    let result = count_from.call(&mut store, (0, 5)).expect("call failed");
+    assert_eq!(result, 5);
+
+    // Invalid: start=-5, invariant count >= 0 violated at loop entry
+    let result = count_from.call(&mut store, (-5, 5));
+    assert!(result.is_err(), "Should trap when invariant is violated");
+}

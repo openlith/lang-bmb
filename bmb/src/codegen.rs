@@ -12,7 +12,7 @@ use wasm_encoder::{
     Instruction, MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 
-use crate::ast::{self, Node, Opcode, Operand, Statement, Type};
+use crate::ast::{self, Invariant, Node, Opcode, Operand, Statement, Type};
 use crate::contracts::{ContractCodeGenerator, VerifiedProgram};
 use crate::types::{TypedNode, TypeRegistry};
 use crate::{BmbError, Result};
@@ -321,6 +321,7 @@ impl CodeGenerator {
             postconditions: all_postconditions,
             all_types: all_types.clone(),
             result_local,
+            invariants: &node.invariants,
         };
 
         // Analyze control flow for labels
@@ -378,6 +379,21 @@ impl CodeGenerator {
                         if info.is_loop_target {
                             func.instruction(&Instruction::Loop(BlockType::Empty));
                             open_loops.push(id.name.clone());
+
+                            // Generate invariant check at the start of each loop iteration
+                            // @invariant _label condition
+                            if let Some(inv) = ctx
+                                .invariants
+                                .iter()
+                                .find(|inv| inv.label.name == id.name)
+                            {
+                                let contract_gen = ContractCodeGenerator::new(
+                                    ctx.locals,
+                                    &ctx.all_types,
+                                    ctx.return_type.clone(),
+                                );
+                                contract_gen.generate_assertion(&inv.condition, func);
+                            }
                         }
                     }
                 }
@@ -988,6 +1004,8 @@ struct FunctionContext<'a> {
     all_types: HashMap<String, Type>,
     /// Local index for storing result during postcondition check
     result_local: Option<u32>,
+    /// Loop invariants indexed by label name
+    invariants: &'a [Invariant],
 }
 
 impl<'a> FunctionContext<'a> {
