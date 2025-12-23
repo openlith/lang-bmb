@@ -239,7 +239,7 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
                 returns = parse_type(item.into_inner().next().unwrap())?;
             }
             Rule::contracts => {
-                // Parse contracts: @pre, @post, @invariant, @assert (and compact forms)
+                // Parse contracts: @pre, @post, @invariant, @assert, @variant, @pure, @requires
                 for contract in item.into_inner() {
                     match contract.as_rule() {
                         Rule::pre => {
@@ -267,6 +267,35 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
                             assertions.push(Assert {
                                 condition,
                                 span: assert_span,
+                            });
+                        }
+                        Rule::variant => {
+                            let var_span = pair_to_span(&contract);
+                            let measure = parse_expr(contract.into_inner().next().unwrap())?;
+                            variants.push(Variant {
+                                measure,
+                                span: var_span,
+                            });
+                        }
+                        Rule::pure => {
+                            pure = true;
+                        }
+                        Rule::requires => {
+                            let req_span = pair_to_span(&contract);
+                            let mut req_inner = contract.into_inner();
+                            let contract_name = parse_identifier(req_inner.next().unwrap())?;
+                            let mut args = Vec::new();
+                            if let Some(args_pair) = req_inner.next() {
+                                if args_pair.as_rule() == Rule::requires_args {
+                                    for arg in args_pair.into_inner() {
+                                        args.push(parse_expr(arg)?);
+                                    }
+                                }
+                            }
+                            requires.push(Requires {
+                                contract: contract_name,
+                                args,
+                                span: req_span,
                             });
                         }
                         _ => {}
