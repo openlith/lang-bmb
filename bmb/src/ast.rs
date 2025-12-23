@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-/// A complete BMB program consisting of imports, type definitions, and nodes
+/// A complete BMB program consisting of imports, type definitions, contracts, and nodes
 #[derive(Debug, Clone)]
 pub struct Program {
     /// Module declaration (@module / @.) - Index system
@@ -15,6 +15,8 @@ pub struct Program {
     pub uses: Vec<ModuleUse>,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
+    /// Named contract definitions (@contract)
+    pub contracts: Vec<ContractDef>,
     pub nodes: Vec<Node>,
 }
 
@@ -75,6 +77,21 @@ pub struct EnumDef {
 pub struct EnumVariant {
     pub name: Identifier,
     pub payload: Option<Type>,
+    pub span: Span,
+}
+
+/// A named contract definition (@contract / @#c)
+/// Reusable contract templates that can be referenced by @requires
+#[derive(Debug, Clone)]
+pub struct ContractDef {
+    /// Contract name (e.g., "positive_range")
+    pub name: Identifier,
+    /// Contract parameters with types
+    pub params: Vec<Parameter>,
+    /// Preconditions (@pre)
+    pub preconditions: Vec<Expr>,
+    /// Postconditions (@post)
+    pub postconditions: Vec<Expr>,
     pub span: Span,
 }
 

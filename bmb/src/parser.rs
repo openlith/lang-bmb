@@ -39,6 +39,7 @@ pub fn parse(source: &str) -> Result<Program> {
     let mut uses = Vec::new();
     let mut structs = Vec::new();
     let mut enums = Vec::new();
+    let mut contracts = Vec::new();
     let mut nodes = Vec::new();
 
     // Get the program pair and iterate over its inner pairs
@@ -60,6 +61,9 @@ pub fn parse(source: &str) -> Result<Program> {
                 Rule::enum_def => {
                     enums.push(parse_enum_def(pair)?);
                 }
+                Rule::contract_def => {
+                    contracts.push(parse_contract_def(pair)?);
+                }
                 Rule::node => {
                     nodes.push(parse_node(pair)?);
                 }
@@ -75,6 +79,7 @@ pub fn parse(source: &str) -> Result<Program> {
         uses,
         structs,
         enums,
+        contracts,
         nodes,
     })
 }
@@ -196,6 +201,66 @@ fn parse_enum_def(pair: pest::iterators::Pair<Rule>) -> Result<EnumDef> {
     Ok(EnumDef {
         name,
         variants,
+        span,
+    })
+}
+
+/// Parse a named contract definition: @contract name(params) @pre ... @post ...
+fn parse_contract_def(pair: pest::iterators::Pair<Rule>) -> Result<ContractDef> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    // Parse name
+    let name = parse_identifier(inner.next().unwrap())?;
+
+    // Parse parameters and body
+    let mut params = Vec::new();
+    let mut preconditions = Vec::new();
+    let mut postconditions = Vec::new();
+
+    for item in inner {
+        match item.as_rule() {
+            Rule::contract_params => {
+                for param_pair in item.into_inner() {
+                    if param_pair.as_rule() == Rule::contract_param {
+                        let param_span = pair_to_span(&param_pair);
+                        let mut param_inner = param_pair.into_inner();
+                        let param_name = parse_identifier(param_inner.next().unwrap())?;
+                        let param_type = parse_type(param_inner.next().unwrap())?;
+                        params.push(Parameter {
+                            name: param_name,
+                            ty: param_type,
+                            span: param_span,
+                        });
+                    }
+                }
+            }
+            Rule::contract_body => {
+                for body_item in item.into_inner() {
+                    match body_item.as_rule() {
+                        Rule::contract_pre => {
+                            for expr_pair in body_item.into_inner() {
+                                preconditions.push(parse_expr(expr_pair)?);
+                            }
+                        }
+                        Rule::contract_post => {
+                            for expr_pair in body_item.into_inner() {
+                                postconditions.push(parse_expr(expr_pair)?);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ContractDef {
+        name,
+        params,
+        preconditions,
+        postconditions,
         span,
     })
 }

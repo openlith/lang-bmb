@@ -694,6 +694,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: crate::ast::Identifier::new("main", crate::ast::Span::default()),
                 tags: vec![],
@@ -720,6 +721,7 @@ mod tests {
                 uses: vec![],
                 structs: vec![],
                 enums: vec![],
+                contracts: vec![],
                 nodes: vec![crate::ast::Node {
                     name: crate::ast::Identifier::new("add", crate::ast::Span::default()),
                     tags: vec![],
@@ -794,6 +796,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: crate::ast::Identifier::new("caller", crate::ast::Span::default()),
                 tags: vec![],
@@ -846,6 +849,7 @@ mod tests {
                 uses: vec![],
                 structs: vec![],
                 enums: vec![],
+                contracts: vec![],
                 nodes: vec![crate::ast::Node {
                     name: crate::ast::Identifier::new("adder", crate::ast::Span::default()),
                     tags: vec![],
@@ -913,6 +917,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("sum", crate::ast::Span::default()),
                 tags: vec![
@@ -966,6 +971,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("sum", crate::ast::Span::default()),
                 tags: vec![Identifier::new("pure", crate::ast::Span::default())],
@@ -998,6 +1004,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("area", crate::ast::Span::default()),
                 tags: vec![Identifier::new("pure", crate::ast::Span::default())],
@@ -1030,6 +1037,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("read", crate::ast::Span::default()),
                 tags: vec![Identifier::new("io", crate::ast::Span::default())],
@@ -1074,6 +1082,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("sum", crate::ast::Span::default()),
                 tags: vec![
@@ -1106,6 +1115,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("read", crate::ast::Span::default()),
                 tags: vec![
@@ -1163,6 +1173,7 @@ mod tests {
             uses: vec![],
             structs: vec![],
             enums: vec![],
+            contracts: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("helper", crate::ast::Span::default()),
                 tags: vec![],

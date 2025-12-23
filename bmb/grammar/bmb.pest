@@ -22,8 +22,22 @@
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
-// Program structure - includes module declaration, imports, types, data, and nodes
-program = { SOI ~ module_decl? ~ (import | use_module)* ~ (struct_def | enum_def | data_def)* ~ node* ~ EOI }
+// Program structure - includes module declaration, imports, types, contracts, data, and nodes
+program = { SOI ~ module_decl? ~ (import | use_module)* ~ (struct_def | enum_def | contract_def | data_def)* ~ node* ~ EOI }
+
+// Named contract definition (reusable contract templates)
+// @contract positive_range(n:i32, max:i32)
+// @pre n > 0
+// @pre n < max
+// @post ret > 0
+contract_def = {
+    ("@contract" | "@#c") ~ ident ~ "(" ~ contract_params? ~ ")" ~ contract_body
+}
+contract_params = { contract_param ~ ("," ~ contract_param)* }
+contract_param = { ident ~ ":" ~ type_name }
+contract_body = { (contract_pre | contract_post)+ }
+contract_pre = { ("@pre" | "@<") ~ expr }
+contract_post = { ("@post" | "@>") ~ expr }
 
 // Data segment definition (static byte data in memory)
 // @data name "string literal"
