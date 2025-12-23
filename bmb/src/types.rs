@@ -764,13 +764,34 @@ fn unified_comparison_type(left: &Type, right: &Type) -> Option<Type> {
         return Some(left.clone());
     }
 
-    // Integer promotion: i32 can be promoted to i64
-    match (left, right) {
-        (Type::I32, Type::I64) | (Type::I64, Type::I32) => Some(Type::I64),
-        // Float promotion: f32 can be compared with f64 (f32 promoted to f64)
-        (Type::F32, Type::F64) | (Type::F64, Type::F32) => Some(Type::F64),
-        _ => None,
+    // Signed integer promotion: smaller → larger
+    // i8 → i16 → i32 → i64
+    if left.is_signed_integer() && right.is_signed_integer() {
+        return Some(match (left, right) {
+            (Type::I8, t) | (t, Type::I8) if *t != Type::I8 => t.clone(),
+            (Type::I16, t) | (t, Type::I16) if *t != Type::I8 && *t != Type::I16 => t.clone(),
+            (Type::I32, Type::I64) | (Type::I64, Type::I32) => Type::I64,
+            _ => return None,
+        });
     }
+
+    // Unsigned integer promotion: smaller → larger
+    // u8 → u16 → u32 → u64
+    if left.is_unsigned_integer() && right.is_unsigned_integer() {
+        return Some(match (left, right) {
+            (Type::U8, t) | (t, Type::U8) if *t != Type::U8 => t.clone(),
+            (Type::U16, t) | (t, Type::U16) if *t != Type::U8 && *t != Type::U16 => t.clone(),
+            (Type::U32, Type::U64) | (Type::U64, Type::U32) => Type::U64,
+            _ => return None,
+        });
+    }
+
+    // Float promotion: f32 → f64
+    if left.is_float() && right.is_float() {
+        return Some(Type::F64);
+    }
+
+    None
 }
 
 fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type> {
@@ -1127,5 +1148,84 @@ _less:
         assert_eq!(registry.get_field_type("Point", "x"), Some(&Type::I32));
         assert_eq!(registry.get_field_type("Point", "y"), Some(&Type::F64));
         assert_eq!(registry.get_field_type("Point", "z"), None);
+    }
+
+    #[test]
+    fn test_typecheck_u8_function() {
+        let source = r#"
+@node byte_add
+@params a:u8 b:u8
+@returns u8
+
+  add %r a b
+  ret %r
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "u8 params should typecheck: {:?}", result.err());
+        let typed = result.unwrap();
+        assert_eq!(typed.nodes[0].node.returns, Type::U8);
+    }
+
+    #[test]
+    fn test_typecheck_char_function() {
+        let source = r#"
+@node identity_char
+@params c:char
+@returns char
+
+  ret c
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "char type should typecheck: {:?}", result.err());
+        let typed = result.unwrap();
+        assert_eq!(typed.nodes[0].node.returns, Type::Char);
+    }
+
+    #[test]
+    fn test_typecheck_ptr_function() {
+        let source = r#"
+@node ptr_passthrough
+@params ptr:*i32
+@returns *i32
+
+  ret ptr
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "pointer type should typecheck: {:?}", result.err());
+        let typed = result.unwrap();
+        match &typed.nodes[0].node.returns {
+            Type::Ptr(inner) => assert_eq!(**inner, Type::I32),
+            other => panic!("Expected pointer type, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_unified_comparison_type() {
+        // Same types return themselves
+        assert_eq!(unified_comparison_type(&Type::I32, &Type::I32), Some(Type::I32));
+        assert_eq!(unified_comparison_type(&Type::U64, &Type::U64), Some(Type::U64));
+
+        // Signed integer promotion
+        assert_eq!(unified_comparison_type(&Type::I8, &Type::I32), Some(Type::I32));
+        assert_eq!(unified_comparison_type(&Type::I16, &Type::I64), Some(Type::I64));
+        assert_eq!(unified_comparison_type(&Type::I32, &Type::I64), Some(Type::I64));
+
+        // Unsigned integer promotion
+        assert_eq!(unified_comparison_type(&Type::U8, &Type::U32), Some(Type::U32));
+        assert_eq!(unified_comparison_type(&Type::U16, &Type::U64), Some(Type::U64));
+        assert_eq!(unified_comparison_type(&Type::U32, &Type::U64), Some(Type::U64));
+
+        // Float promotion
+        assert_eq!(unified_comparison_type(&Type::F32, &Type::F64), Some(Type::F64));
+
+        // Mixed signed/unsigned: no promotion
+        assert_eq!(unified_comparison_type(&Type::I32, &Type::U32), None);
+
+        // Incompatible types
+        assert_eq!(unified_comparison_type(&Type::I32, &Type::F64), None);
+        assert_eq!(unified_comparison_type(&Type::Bool, &Type::I32), None);
     }
 }
