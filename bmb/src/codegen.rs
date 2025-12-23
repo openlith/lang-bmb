@@ -1266,11 +1266,29 @@ mod tests {
 
     #[test]
     fn test_type_to_valtype() {
+        // Signed integers: 8/16/32-bit → i32, 64-bit → i64
+        assert_eq!(type_to_valtype(&Type::I8), ValType::I32);
+        assert_eq!(type_to_valtype(&Type::I16), ValType::I32);
         assert_eq!(type_to_valtype(&Type::I32), ValType::I32);
-        assert_eq!(type_to_valtype(&Type::Bool), ValType::I32);
         assert_eq!(type_to_valtype(&Type::I64), ValType::I64);
+
+        // Unsigned integers: 8/16/32-bit → i32, 64-bit → i64
+        assert_eq!(type_to_valtype(&Type::U8), ValType::I32);
+        assert_eq!(type_to_valtype(&Type::U16), ValType::I32);
+        assert_eq!(type_to_valtype(&Type::U32), ValType::I32);
+        assert_eq!(type_to_valtype(&Type::U64), ValType::I64);
+
+        // Other primitives → i32
+        assert_eq!(type_to_valtype(&Type::Bool), ValType::I32);
+        assert_eq!(type_to_valtype(&Type::Char), ValType::I32);
+
+        // Floats
         assert_eq!(type_to_valtype(&Type::F32), ValType::F32);
         assert_eq!(type_to_valtype(&Type::F64), ValType::F64);
+
+        // Pointers → i32 (WASM32)
+        assert_eq!(type_to_valtype(&Type::Ptr(Box::new(Type::I32))), ValType::I32);
+        assert_eq!(type_to_valtype(&Type::Ref(Box::new(Type::I32))), ValType::I32);
     }
 
     #[test]
@@ -1503,19 +1521,38 @@ mod tests {
 
     #[test]
     fn test_type_size_align() {
+        // 8-bit types
+        assert_eq!(type_size_align(&Type::I8), (1, 1));
+        assert_eq!(type_size_align(&Type::U8), (1, 1));
+
+        // 16-bit types
+        assert_eq!(type_size_align(&Type::I16), (2, 2));
+        assert_eq!(type_size_align(&Type::U16), (2, 2));
+
+        // 32-bit types
         assert_eq!(type_size_align(&Type::I32), (4, 4));
-        assert_eq!(type_size_align(&Type::I64), (8, 8));
+        assert_eq!(type_size_align(&Type::U32), (4, 4));
         assert_eq!(type_size_align(&Type::F32), (4, 4));
+        assert_eq!(type_size_align(&Type::Char), (4, 4));
+        assert_eq!(type_size_align(&Type::Bool), (4, 4)); // Bool is i32 in WASM
+
+        // 64-bit types
+        assert_eq!(type_size_align(&Type::I64), (8, 8));
+        assert_eq!(type_size_align(&Type::U64), (8, 8));
         assert_eq!(type_size_align(&Type::F64), (8, 8));
-        assert_eq!(type_size_align(&Type::Bool), (4, 4));
+
+        // Void
         assert_eq!(type_size_align(&Type::Void), (0, 1));
 
+        // Array
         let array_type = Type::Array {
             element: Box::new(Type::I32),
             size: 10,
         };
         assert_eq!(type_size_align(&array_type), (40, 4)); // 10 * 4 = 40 bytes
 
+        // Pointers (32-bit in WASM32)
         assert_eq!(type_size_align(&Type::Ref(Box::new(Type::I32))), (4, 4));
+        assert_eq!(type_size_align(&Type::Ptr(Box::new(Type::I64))), (4, 4));
     }
 }
