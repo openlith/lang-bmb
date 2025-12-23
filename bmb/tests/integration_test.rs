@@ -965,3 +965,285 @@ fn test_execute_f32_division() {
     let result = divide32.call(&mut store, (10.0, 0.0));
     assert!(result.is_err(), "should trap on precondition violation");
 }
+
+// ========== Bitwise Operation Tests ==========
+
+#[test]
+fn test_execute_bitwise_and() {
+    let source = r#"
+# Bitwise AND operation
+@node bitwise_and
+@params a:i32 b:i32
+@returns i32
+
+  and %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let bitwise_and = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "bitwise_and")
+        .expect("bitwise_and function not found");
+
+    // Test: 0xFF00 & 0x0F0F = 0x0F00
+    let result = bitwise_and.call(&mut store, (0xFF00, 0x0F0F)).expect("call failed");
+    assert_eq!(result, 0x0F00);
+
+    // Test: 0b1010 & 0b1100 = 0b1000 (10 & 12 = 8)
+    let result = bitwise_and.call(&mut store, (10, 12)).expect("call failed");
+    assert_eq!(result, 8);
+
+    // Test: any & 0 = 0
+    let result = bitwise_and.call(&mut store, (0xFFFFFFFF_u32 as i32, 0)).expect("call failed");
+    assert_eq!(result, 0);
+}
+
+#[test]
+fn test_execute_bitwise_or() {
+    let source = r#"
+# Bitwise OR operation
+@node bitwise_or
+@params a:i32 b:i32
+@returns i32
+
+  or %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let bitwise_or = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "bitwise_or")
+        .expect("bitwise_or function not found");
+
+    // Test: 0xFF00 | 0x00FF = 0xFFFF
+    let result = bitwise_or.call(&mut store, (0xFF00, 0x00FF)).expect("call failed");
+    assert_eq!(result, 0xFFFF);
+
+    // Test: 0b1010 | 0b1100 = 0b1110 (10 | 12 = 14)
+    let result = bitwise_or.call(&mut store, (10, 12)).expect("call failed");
+    assert_eq!(result, 14);
+
+    // Test: any | 0 = any
+    let result = bitwise_or.call(&mut store, (42, 0)).expect("call failed");
+    assert_eq!(result, 42);
+}
+
+#[test]
+fn test_execute_bitwise_xor() {
+    let source = r#"
+# Bitwise XOR operation
+@node bitwise_xor
+@params a:i32 b:i32
+@returns i32
+
+  xor %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let bitwise_xor = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "bitwise_xor")
+        .expect("bitwise_xor function not found");
+
+    // Test: 0xFF00 ^ 0x0FF0 = 0xF0F0
+    let result = bitwise_xor.call(&mut store, (0xFF00, 0x0FF0)).expect("call failed");
+    assert_eq!(result, 0xF0F0);
+
+    // Test: 0b1010 ^ 0b1100 = 0b0110 (10 ^ 12 = 6)
+    let result = bitwise_xor.call(&mut store, (10, 12)).expect("call failed");
+    assert_eq!(result, 6);
+
+    // Test: XOR self = 0 (self-inverse property)
+    let result = bitwise_xor.call(&mut store, (12345, 12345)).expect("call failed");
+    assert_eq!(result, 0);
+}
+
+#[test]
+fn test_execute_bitwise_shl() {
+    let source = r#"
+# Bitwise shift left
+@node shift_left
+@params a:i32 n:i32
+@returns i32
+
+  shl %r a n
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let shift_left = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "shift_left")
+        .expect("shift_left function not found");
+
+    // Test: 1 << 4 = 16
+    let result = shift_left.call(&mut store, (1, 4)).expect("call failed");
+    assert_eq!(result, 16);
+
+    // Test: 3 << 2 = 12
+    let result = shift_left.call(&mut store, (3, 2)).expect("call failed");
+    assert_eq!(result, 12);
+
+    // Test: 0xFF << 8 = 0xFF00
+    let result = shift_left.call(&mut store, (0xFF, 8)).expect("call failed");
+    assert_eq!(result, 0xFF00);
+}
+
+#[test]
+fn test_execute_bitwise_shr() {
+    let source = r#"
+# Bitwise shift right (arithmetic)
+@node shift_right
+@params a:i32 n:i32
+@returns i32
+
+  shr %r a n
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let shift_right = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "shift_right")
+        .expect("shift_right function not found");
+
+    // Test: 16 >> 4 = 1
+    let result = shift_right.call(&mut store, (16, 4)).expect("call failed");
+    assert_eq!(result, 1);
+
+    // Test: 0xFF00 >> 8 = 0xFF
+    let result = shift_right.call(&mut store, (0xFF00, 8)).expect("call failed");
+    assert_eq!(result, 0xFF);
+
+    // Test: Arithmetic shift preserves sign: -8 >> 2 = -2
+    let result = shift_right.call(&mut store, (-8, 2)).expect("call failed");
+    assert_eq!(result, -2);
+}
+
+#[test]
+fn test_execute_bitwise_not() {
+    let source = r#"
+# Bitwise NOT operation
+@node bitwise_not
+@params a:i32
+@returns i32
+
+  not %r a
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let bitwise_not = instance
+        .get_typed_func::<i32, i32>(&mut store, "bitwise_not")
+        .expect("bitwise_not function not found");
+
+    // Test: ~0 = -1 (all bits set)
+    let result = bitwise_not.call(&mut store, 0).expect("call failed");
+    assert_eq!(result, -1);
+
+    // Test: ~(-1) = 0
+    let result = bitwise_not.call(&mut store, -1).expect("call failed");
+    assert_eq!(result, 0);
+
+    // Test: ~1 = -2 (binary: ...11111110)
+    let result = bitwise_not.call(&mut store, 1).expect("call failed");
+    assert_eq!(result, -2);
+}
+
+#[test]
+fn test_execute_bitwise_combined() {
+    let source = r#"
+# Combined bitwise operations: extract bits
+# Extract bits 4-7 from input: (a >> 4) & 0xF
+@node extract_nibble
+@params a:i32
+@returns i32
+
+  shr %shifted a 4
+  and %r %shifted 15
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let extract_nibble = instance
+        .get_typed_func::<i32, i32>(&mut store, "extract_nibble")
+        .expect("extract_nibble function not found");
+
+    // Test: 0xAB -> second nibble = 0xA = 10
+    let result = extract_nibble.call(&mut store, 0xAB).expect("call failed");
+    assert_eq!(result, 0xA);
+
+    // Test: 0x1234 -> nibble at position 1 = 0x3
+    let result = extract_nibble.call(&mut store, 0x1234).expect("call failed");
+    assert_eq!(result, 0x3);
+}
+
+#[test]
+fn test_execute_bitwise_i64() {
+    let source = r#"
+# i64 bitwise operations
+@node bitwise_and64
+@params a:i64 b:i64
+@returns i64
+
+  and %r a b
+  ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let bitwise_and64 = instance
+        .get_typed_func::<(i64, i64), i64>(&mut store, "bitwise_and64")
+        .expect("bitwise_and64 function not found");
+
+    // Test: Large 64-bit values
+    let result = bitwise_and64
+        .call(&mut store, (0xFF00FF00FF00FF00_u64 as i64, 0x0F0F0F0F0F0F0F0F_u64 as i64))
+        .expect("call failed");
+    assert_eq!(result, 0x0F000F000F000F00_u64 as i64);
+}

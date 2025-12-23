@@ -1438,4 +1438,249 @@ _base:
         assert_eq!(node.requires.len(), 2);
         assert_eq!(node.postconditions.len(), 1);
     }
+
+    // ========== Bitwise Operation Tests ==========
+
+    #[test]
+    fn test_parse_bitwise_and() {
+        let source = r#"
+@node bitwise_and
+@params a:i32 b:i32
+@returns i32
+
+  and %r a b
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse bitwise AND: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        let node = &program.nodes[0];
+        assert_eq!(node.body.len(), 2);
+        if let crate::ast::Instruction::Statement(stmt) = &node.body[0] {
+            assert_eq!(stmt.opcode, crate::ast::Opcode::And);
+        } else {
+            panic!("Expected Statement, got Label");
+        }
+    }
+
+    #[test]
+    fn test_parse_bitwise_or() {
+        let source = r#"
+@node bitwise_or
+@params a:i32 b:i32
+@returns i32
+
+  or %r a b
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse bitwise OR: {:?}", result.err());
+        let program = result.unwrap();
+        if let crate::ast::Instruction::Statement(stmt) = &program.nodes[0].body[0] {
+            assert_eq!(stmt.opcode, crate::ast::Opcode::Or);
+        }
+    }
+
+    #[test]
+    fn test_parse_bitwise_xor() {
+        let source = r#"
+@node bitwise_xor
+@params a:i32 b:i32
+@returns i32
+
+  xor %r a b
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse bitwise XOR: {:?}", result.err());
+        let program = result.unwrap();
+        if let crate::ast::Instruction::Statement(stmt) = &program.nodes[0].body[0] {
+            assert_eq!(stmt.opcode, crate::ast::Opcode::Xor);
+        }
+    }
+
+    #[test]
+    fn test_parse_bitwise_shl() {
+        let source = r#"
+@node shift_left
+@params a:i32 n:i32
+@returns i32
+
+  shl %r a n
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse shift left: {:?}", result.err());
+        let program = result.unwrap();
+        if let crate::ast::Instruction::Statement(stmt) = &program.nodes[0].body[0] {
+            assert_eq!(stmt.opcode, crate::ast::Opcode::Shl);
+        }
+    }
+
+    #[test]
+    fn test_parse_bitwise_shr() {
+        let source = r#"
+@node shift_right
+@params a:i32 n:i32
+@returns i32
+
+  shr %r a n
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse shift right: {:?}", result.err());
+        let program = result.unwrap();
+        if let crate::ast::Instruction::Statement(stmt) = &program.nodes[0].body[0] {
+            assert_eq!(stmt.opcode, crate::ast::Opcode::Shr);
+        }
+    }
+
+    #[test]
+    fn test_parse_bitwise_not() {
+        let source = r#"
+@node bitwise_not
+@params a:i32
+@returns i32
+
+  not %r a
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse bitwise NOT: {:?}", result.err());
+        let program = result.unwrap();
+        if let crate::ast::Instruction::Statement(stmt) = &program.nodes[0].body[0] {
+            assert_eq!(stmt.opcode, crate::ast::Opcode::Not);
+        }
+    }
+
+    #[test]
+    fn test_parse_chained_bitwise() {
+        let source = r#"
+@node chained_bitwise
+@params a:i32 b:i32
+@returns i32
+
+  and %tmp a b
+  or %tmp2 %tmp a
+  xor %r %tmp2 b
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse chained bitwise ops: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.nodes[0].body.len(), 4);
+    }
+
+    // ========== @contract Definition Tests ==========
+
+    #[test]
+    fn test_parse_contract_def_basic() {
+        let source = r#"
+@contract positive(n:i32)
+@pre n > 0
+@post ret > 0
+
+@node test_fn
+@params x:i32
+@returns i32
+
+  ret x
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @contract definition: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.contracts.len(), 1);
+        assert_eq!(program.contracts[0].name.name, "positive");
+        assert_eq!(program.contracts[0].params.len(), 1);
+        assert_eq!(program.contracts[0].preconditions.len(), 1);
+        assert_eq!(program.contracts[0].postconditions.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_contract_def_multiple_params() {
+        let source = r#"
+@contract in_range(n:i32, min:i32, max:i32)
+@pre n >= min
+@pre n <= max
+@post ret == n
+
+@node test_fn
+@params x:i32
+@returns i32
+
+  ret x
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @contract with multiple params: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.contracts[0].params.len(), 3);
+        assert_eq!(program.contracts[0].params[0].name.name, "n");
+        assert_eq!(program.contracts[0].params[1].name.name, "min");
+        assert_eq!(program.contracts[0].params[2].name.name, "max");
+        assert_eq!(program.contracts[0].preconditions.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_contract_def_compact() {
+        let source = r#"
+@#c non_negative(x:i64)
+@< x >= 0
+@> ret >= 0
+
+@node test_fn
+@params x:i32
+@returns i32
+
+  ret x
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @#c (compact contract): {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.contracts.len(), 1);
+        assert_eq!(program.contracts[0].name.name, "non_negative");
+    }
+
+    #[test]
+    fn test_parse_multiple_contract_defs() {
+        let source = r#"
+@contract positive(n:i32)
+@pre n > 0
+
+@contract non_zero(n:i32)
+@pre n != 0
+@post ret != 0
+
+@node test_fn
+@params x:i32
+@returns i32
+
+  ret x
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse multiple @contract definitions: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.contracts.len(), 2);
+        assert_eq!(program.contracts[0].name.name, "positive");
+        assert_eq!(program.contracts[1].name.name, "non_zero");
+    }
+
+    #[test]
+    fn test_parse_contract_no_params() {
+        let source = r#"
+@contract always_true()
+@pre true
+@post true
+
+@node test_fn
+@params
+@returns i32
+
+  ret 42
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Should parse @contract with no params: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.contracts[0].params.len(), 0);
+    }
 }
