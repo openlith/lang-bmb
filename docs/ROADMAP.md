@@ -51,11 +51,12 @@ v1.0.0: Performance Transcendence Complete 🎯
 | `@variant` termination proof (grammar/AST/parser) | Critical | ✅ Done |
 | `@pure` side-effect annotation (grammar/AST/parser) | Critical | ✅ Done |
 | `@requires` contract chaining (grammar/AST/parser) | High | ✅ Done |
-| `@contract` named contract definitions | High | Planned |
+| `@contract` named contract definitions | High | ✅ Done |
 | `@constraint` timing (on_create/on_mutate) | High | ✅ Spec |
-| Bitwise ISA (and/or/xor/shl/shr/not) | High | ✅ Spec |
+| Bitwise ISA (and/or/xor/shl/shr/not) | High | ✅ Done |
+| `@requires` verification logic | Critical | 🔄 In Progress |
+| `@pure` verification logic | Critical | 🔄 In Progress |
 | Loop invariant support in verifier | Critical | Planned |
-| Verification logic for new contracts | Critical | Planned |
 
 **Success Criteria**:
 - `@variant` proves termination for recursive functions
