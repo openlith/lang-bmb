@@ -4,13 +4,23 @@
 
 **Last Updated**: 2025-12-23
 **Current Version**: v0.6.0
-**Target**: v1.0.0 (Self-Hosted Compiler)
+**Target**: v1.0.0 (Performance Transcendence)
 
 ---
 
 ## Philosophy
 
 This roadmap follows BMB's core principle: **no shortcuts, no guessing**. Each version represents a complete, testable milestone. The path from v0.6.0 to v1.0.0 is intentionally granular to ensure each step is achievable and verifiable.
+
+### Version Strategy
+
+```
+v0.6-v0.15: Foundation (Self-Hosting)
+v0.16-v0.18: Bronze Stage (Language Features)
+v0.19-v0.21: Silver Stage (LLVM Integration)
+v0.22-v0.24: Gold Stage (Optimization)
+v1.0.0: Performance Transcendence Complete 🎯
+```
 
 ---
 
@@ -294,9 +304,9 @@ error[E202]: Postcondition violation
 
 ---
 
-## v0.15.0: Bootstrapping
+## v0.15.0: Self-Hosted Compiler
 
-**Goal**: BMB compiler compiles itself
+**Goal**: BMB compiler compiles itself - Production-ready self-hosted compiler
 
 | Task | Priority | Complexity |
 |------|----------|------------|
@@ -320,50 +330,26 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 **Success Criteria**:
 - Fixed point achieved
 - Performance within 2x of Rust version
-
----
-
-## v1.0.0: Production Release 🎯
-
-**Goal**: Stable, self-hosted, production-ready compiler
-
-| Requirement | Status |
-|-------------|--------|
-| Self-hosted compiler | Stage 2 = Stage 3 |
-| All contracts proven | Gold level |
-| Documentation complete | All features documented |
-| Tooling stable | LSP, formatter, linter |
-| Package ecosystem | Gotgan registry operational |
-| Performance benchmarks | Published baselines |
-
-**Deliverables**:
 - `bmbc` binary (self-compiled)
 - Standard library with full contracts
-- Language specification (frozen for 1.x)
-- Migration guide from 0.x
+- Tooling stable: LSP, formatter, linter
+- Package ecosystem: Gotgan registry operational
 
 ---
 
-## Post-v1.0: Performance Transcendence Roadmap
+# Performance Transcendence Roadmap
 
 > **Vision**: Surpass C/Rust performance through proof-guided optimization
 >
 > BMB's contract system enables optimizations impossible in languages where the compiler must assume the worst case. When contracts are proven, the compiler gains knowledge that enables aggressive optimizations.
 
-### Phase Overview
-
-```
-v1.0 (Foundation) → v1.1-1.3 (Bronze) → v1.4-1.6 (Silver) → v1.7-2.0 (Gold)
-     Self-hosted      Language Core       LLVM Integration     Transcendence
-```
-
 ---
 
-### Bronze Stage (v1.1 - v1.3): Language Foundation
+## Bronze Stage (v0.16 - v0.18): Language Foundation
 
 **Goal**: Complete language features enabling advanced optimization
 
-#### v1.1: Region-Based Memory
+### v0.16.0: Region-Based Memory
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -387,7 +373,7 @@ v1.0 (Foundation) → v1.1-1.3 (Bronze) → v1.4-1.6 (Silver) → v1.7-2.0 (Gold
 - Region-scoped allocation verified at compile time
 - Stack allocation for non-escaping data
 
-#### v1.2: Effect System
+### v0.17.0: Effect System
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -416,7 +402,7 @@ v1.0 (Foundation) → v1.1-1.3 (Bronze) → v1.4-1.6 (Silver) → v1.7-2.0 (Gold
 - Effect system integrates with contract verification
 - @pure functions provably side-effect free
 
-#### v1.3: Liquid Types
+### v0.18.0: Liquid Types
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -445,11 +431,11 @@ v1.0 (Foundation) → v1.1-1.3 (Bronze) → v1.4-1.6 (Silver) → v1.7-2.0 (Gold
 
 ---
 
-### Silver Stage (v1.4 - v1.6): LLVM Integration
+## Silver Stage (v0.19 - v0.21): LLVM Integration
 
 **Goal**: Translate contract knowledge into LLVM optimization hints
 
-#### v1.4: LLVM Backend Foundation
+### v0.19.0: LLVM Backend Foundation
 
 | Task | Description | Priority |
 |------|-------------|----------|
@@ -467,7 +453,7 @@ BMB Source → AST → TypedProgram → VerifiedProgram → LLVM IR → Native
                                   LLVM Metadata
 ```
 
-#### v1.5: Contract-Driven Metadata
+### v0.20.0: Contract-Driven Metadata
 
 | Task | Description | LLVM Feature |
 |------|-------------|--------------|
@@ -496,7 +482,7 @@ define i32 @process(i32 %x) {
 - Contract proofs generate LLVM metadata
 - 10-30% performance improvement over basic codegen
 
-#### v1.6: Advanced LLVM Optimization
+### v0.21.0: Advanced LLVM Optimization
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -523,11 +509,11 @@ bmbc compile program.bmb --emit llvm --pgo-use=profile.data -o program
 
 ---
 
-### Gold Stage (v1.7 - v2.0): Performance Transcendence
+## Gold Stage (v0.22 - v0.24): Performance Transcendence
 
 **Goal**: Surpass C/Rust through proof-guided optimization
 
-#### v1.7: Proof-Guided Loop Optimization
+### v0.22.0: Proof-Guided Loop Optimization
 
 | Task | Description | Optimization Enabled |
 |------|-------------|---------------------|
@@ -568,7 +554,7 @@ define i64 @sum_array([N x i32]* %arr, i32 %len) {
 }
 ```
 
-#### v1.8: Comptime Execution
+### v0.23.0: Comptime Execution
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -604,7 +590,7 @@ _recurse:
   ret %result
 ```
 
-#### v1.9: SIMD & Vectorization
+### v0.24.0: SIMD & Vectorization
 
 | Task | Description | Target |
 |------|-------------|--------|
@@ -627,7 +613,9 @@ _recurse:
   # Contract proves safety of 8-wide operations
 ```
 
-#### v2.0: Transcendence Complete
+---
+
+## v1.0.0: Performance Transcendence Complete 🎯
 
 | Capability | C | Rust | BMB |
 |------------|---|------|-----|
@@ -655,6 +643,12 @@ Example: Array access
 - Proof-guided optimization documented and reproducible
 - Philosophy maintained: "Omission is guessing, and guessing is error"
 
+**Deliverables**:
+- `bmbc` binary with LLVM backend
+- Full proof-guided optimization pipeline
+- Comprehensive benchmark suite vs C/Rust
+- Performance transcendence documentation
+
 ---
 
 ## Research-Backed Optimization Summary
@@ -671,7 +665,7 @@ Example: Array access
 
 ---
 
-## Future Directions (Post-v2.0)
+## Future Directions (Post-v1.0)
 
 | Feature | Description | Priority |
 |---------|-------------|----------|
@@ -680,6 +674,8 @@ Example: Array access
 | Incremental compilation | Faster rebuilds | High |
 | Distributed verification | Parallel SMT solving | Medium |
 | AI-assisted contracts | Contract suggestion | Low |
+| WebGPU backend | Browser-based GPU compute | Medium |
+| Embedded targets | ARM Cortex-M, RISC-V | High |
 
 ---
 
@@ -699,7 +695,8 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 5.0 | 2025-12-23 | Post-v1.0 Performance Transcendence Roadmap (Bronze/Silver/Gold stages, LLVM at v1.4+, research-backed optimizations) |
+| 6.0 | 2025-12-23 | Version restructure: v1.0.0 = Performance Transcendence, all prior stages v0.x |
+| 5.0 | 2025-12-23 | Performance Transcendence Roadmap (Bronze/Silver/Gold stages, research-backed) |
 | 4.0 | 2025-12-23 | Extended roadmap v0.7-v0.15, realistic phases |
 | 3.0 | 2025-12-22 | v0.4.0 current status |
 | 2.0 | 2025-12-21 | Initial v0.2.0 roadmap |
