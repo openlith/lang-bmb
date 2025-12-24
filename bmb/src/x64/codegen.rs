@@ -683,9 +683,8 @@ impl X64Codegen {
             Opcode::Shl => self.compile_binary_op(stmt, BinaryOp::Shl),
             Opcode::Shr => self.compile_binary_op(stmt, BinaryOp::Shr),
             Opcode::Not => self.compile_not(stmt),
-            Opcode::Load | Opcode::Store => Err(BmbError::CodegenError {
-                message: "Memory operations not yet implemented".to_string(),
-            }),
+            Opcode::Load => self.compile_load(stmt),
+            Opcode::Store => self.compile_store(stmt),
             Opcode::Print => self.compile_print(stmt),
             Opcode::Box | Opcode::Unbox | Opcode::Drop => Err(BmbError::CodegenError {
                 message: "Heap allocation operations not yet implemented for x64".to_string(),
@@ -844,6 +843,45 @@ impl X64Codegen {
 
         // Apply bitwise NOT
         self.code.not_r64(dst_reg);
+
+        Ok(())
+    }
+
+    /// Compile load instruction: load %dest %ptr
+    /// Philosophy: "Omission is guessing" - explicit memory access with clear semantics
+    fn compile_load(&mut self, stmt: &Statement) -> Result<(), BmbError> {
+        let dst_name = match &stmt.operands[0] {
+            Operand::Register(v) => v.name.trim_start_matches('%').to_string(),
+            _ => {
+                return Err(BmbError::CodegenError {
+                    message: "LOAD destination must be register".to_string(),
+                })
+            }
+        };
+
+        let dst_reg = self.alloc_reg(&dst_name)?;
+
+        // Get the pointer register (contains the memory address)
+        let ptr_reg = self.operand_to_reg(&stmt.operands[1], None)?;
+
+        // Load 64-bit value from memory at address in ptr_reg
+        // For simplicity, we use 64-bit loads (can be extended for typed loads)
+        self.code.mov_r64_mem64(dst_reg, ptr_reg);
+
+        Ok(())
+    }
+
+    /// Compile store instruction: store %ptr %value
+    /// Philosophy: "Omission is guessing" - explicit memory writes
+    fn compile_store(&mut self, stmt: &Statement) -> Result<(), BmbError> {
+        // Get the pointer register (contains the memory address)
+        let ptr_reg = self.operand_to_reg(&stmt.operands[0], None)?;
+
+        // Get the value to store
+        let val_reg = self.operand_to_reg(&stmt.operands[1], None)?;
+
+        // Store 64-bit value to memory at address in ptr_reg
+        self.code.mov_mem64_r64(ptr_reg, val_reg);
 
         Ok(())
     }

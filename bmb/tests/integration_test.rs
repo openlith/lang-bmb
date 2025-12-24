@@ -2298,6 +2298,158 @@ fn test_box_returns_pointer() {
 }
 
 // =============================================================================
+// Load/Store Memory Operation Tests (v0.15.1+)
+// Philosophy: "Omission is guessing" - explicit memory access with clear semantics
+// =============================================================================
+
+#[test]
+fn test_load_store_basic_i32() {
+    // Test basic load/store cycle: box -> store -> load
+    // Note: Function name avoids reserved word prefix (load_, store_)
+    let source = r#"
+@node mem_rw_test
+@params value:i32
+@returns i32
+
+  # Allocate memory on heap
+  box %ptr %value
+
+  # Store a different value (double the input)
+  add %doubled %value %value
+  store %ptr %doubled
+
+  # Load it back
+  load %result %ptr
+
+  ret %result
+"#;
+
+    let wasm = compile_bmb(source);
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let mem_rw_test = instance
+        .get_typed_func::<i32, i32>(&mut store, "mem_rw_test")
+        .expect("mem_rw_test function not found");
+
+    // Should return doubled value
+    assert_eq!(mem_rw_test.call(&mut store, 21).unwrap(), 42);
+    assert_eq!(mem_rw_test.call(&mut store, 50).unwrap(), 100);
+    assert_eq!(mem_rw_test.call(&mut store, -10).unwrap(), -20);
+}
+
+#[test]
+fn test_load_store_multiple_locations() {
+    // Test store/load with multiple memory locations
+    let source = r#"
+@node multi_mem
+@params a:i32 b:i32
+@returns i32
+
+  # Allocate two memory locations
+  box %ptrA %a
+  box %ptrB %b
+
+  # Swap values via load/store
+  load %valA %ptrA
+  load %valB %ptrB
+  store %ptrA %valB
+  store %ptrB %valA
+
+  # Return sum of swapped values (should equal original sum)
+  load %resA %ptrA
+  load %resB %ptrB
+  add %sum %resA %resB
+
+  ret %sum
+"#;
+
+    let wasm = compile_bmb(source);
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let multi_mem = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "multi_mem")
+        .expect("multi_mem function not found");
+
+    // Sum should be preserved after swap
+    assert_eq!(multi_mem.call(&mut store, (10, 20)).unwrap(), 30);
+    assert_eq!(multi_mem.call(&mut store, (100, 200)).unwrap(), 300);
+}
+
+#[test]
+fn test_load_after_box() {
+    // Test that load can read the value stored by box
+    let source = r#"
+@node read_boxed_value
+@params value:i32
+@returns i32
+
+  # Box stores value at ptr
+  box %ptr %value
+
+  # Load should read the same value
+  load %result %ptr
+
+  ret %result
+"#;
+
+    let wasm = compile_bmb(source);
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let read_boxed_value = instance
+        .get_typed_func::<i32, i32>(&mut store, "read_boxed_value")
+        .expect("read_boxed_value function not found");
+
+    assert_eq!(read_boxed_value.call(&mut store, 42).unwrap(), 42);
+    assert_eq!(read_boxed_value.call(&mut store, -999).unwrap(), -999);
+    assert_eq!(read_boxed_value.call(&mut store, 0).unwrap(), 0);
+}
+
+#[test]
+fn test_store_overwrites_box_value() {
+    // Verify that store properly overwrites the initial box value
+    let source = r#"
+@node overwrite_test
+@params initial:i32 new_value:i32
+@returns i32
+
+  # Box the initial value
+  box %ptr %initial
+
+  # Overwrite with new value
+  store %ptr %new_value
+
+  # Load should return new value, not initial
+  load %result %ptr
+
+  ret %result
+"#;
+
+    let wasm = compile_bmb(source);
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let overwrite_test = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "overwrite_test")
+        .expect("overwrite_test function not found");
+
+    // Should return new_value, not initial
+    assert_eq!(overwrite_test.call(&mut store, (100, 200)).unwrap(), 200);
+    assert_eq!(overwrite_test.call(&mut store, (0, 42)).unwrap(), 42);
+    assert_eq!(overwrite_test.call(&mut store, (999, -1)).unwrap(), -1);
+}
+
+// =============================================================================
 // Exhaustiveness Checking Tests (v0.15+)
 // "Omission is guessing, and guessing is error."
 // =============================================================================

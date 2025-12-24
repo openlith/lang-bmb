@@ -159,6 +159,26 @@ impl ModRM {
         }
     }
 
+    /// Create ModR/M for indirect register addressing [reg] (mod=00)
+    /// reg is the destination/source register, base is the memory base register
+    /// Note: RSP(4) and RBP(5) require special handling (SIB or disp8)
+    pub fn reg_indirect(reg: u8, base: u8) -> Self {
+        Self {
+            mod_: 0b00,
+            reg: reg & 0x07,
+            rm: base & 0x07,
+        }
+    }
+
+    /// Create ModR/M for indirect register with 8-bit displacement [reg+disp8] (mod=01)
+    pub fn reg_indirect_disp8(reg: u8, base: u8) -> Self {
+        Self {
+            mod_: 0b01,
+            reg: reg & 0x07,
+            rm: base & 0x07,
+        }
+    }
+
     /// Encode to byte
     pub fn encode(&self) -> u8 {
         (self.mod_ << 6) | (self.reg << 3) | self.rm
@@ -546,6 +566,115 @@ impl CodeBuffer {
         self.emit(rex.encode());
         self.emit(0xF7); // F7 /2
         self.emit(ModRM::reg_reg(2, dst.encoding()).encode()); // /2 for NOT
+    }
+
+    // ==================== Memory Operations ====================
+
+    /// MOV r64, [r64] - Load 64-bit value from memory
+    /// dst: destination register, base: register containing memory address
+    pub fn mov_r64_mem64(&mut self, dst: Reg64, base: Reg64) {
+        let mut rex = Rex::new().w();
+        if dst.needs_rex_ext() {
+            rex = rex.r();
+        }
+        if base.needs_rex_ext() {
+            rex = rex.b();
+        }
+        self.emit(rex.encode());
+        self.emit(0x8B); // 8B /r - MOV r64, r/m64
+
+        // Handle special cases for RSP/R12 (needs SIB) and RBP/R13 (needs disp8)
+        let base_enc = base.encoding();
+        if base_enc == 4 {
+            // RSP or R12 - need SIB byte
+            self.emit(ModRM::reg_indirect(dst.encoding(), 4).encode());
+            self.emit(0x24); // SIB: scale=0, index=RSP(none), base=RSP
+        } else if base_enc == 5 {
+            // RBP or R13 - need disp8 to avoid RIP-relative
+            self.emit(ModRM::reg_indirect_disp8(dst.encoding(), base_enc).encode());
+            self.emit(0x00); // disp8 = 0
+        } else {
+            self.emit(ModRM::reg_indirect(dst.encoding(), base_enc).encode());
+        }
+    }
+
+    /// MOV [r64], r64 - Store 64-bit value to memory
+    /// base: register containing memory address, src: source register
+    pub fn mov_mem64_r64(&mut self, base: Reg64, src: Reg64) {
+        let mut rex = Rex::new().w();
+        if src.needs_rex_ext() {
+            rex = rex.r();
+        }
+        if base.needs_rex_ext() {
+            rex = rex.b();
+        }
+        self.emit(rex.encode());
+        self.emit(0x89); // 89 /r - MOV r/m64, r64
+
+        let base_enc = base.encoding();
+        if base_enc == 4 {
+            // RSP or R12 - need SIB byte
+            self.emit(ModRM::reg_indirect(src.encoding(), 4).encode());
+            self.emit(0x24); // SIB: scale=0, index=RSP(none), base=RSP
+        } else if base_enc == 5 {
+            // RBP or R13 - need disp8 to avoid RIP-relative
+            self.emit(ModRM::reg_indirect_disp8(src.encoding(), base_enc).encode());
+            self.emit(0x00); // disp8 = 0
+        } else {
+            self.emit(ModRM::reg_indirect(src.encoding(), base_enc).encode());
+        }
+    }
+
+    /// MOV r32, [r64] - Load 32-bit value from memory (zero-extended to 64-bit)
+    pub fn mov_r32_mem32(&mut self, dst: Reg64, base: Reg64) {
+        let mut rex = Rex::new();
+        if dst.needs_rex_ext() {
+            rex = rex.r();
+        }
+        if base.needs_rex_ext() {
+            rex = rex.b();
+        }
+        if rex.is_needed() {
+            self.emit(rex.encode());
+        }
+        self.emit(0x8B); // 8B /r - MOV r32, r/m32 (without REX.W)
+
+        let base_enc = base.encoding();
+        if base_enc == 4 {
+            self.emit(ModRM::reg_indirect(dst.encoding(), 4).encode());
+            self.emit(0x24);
+        } else if base_enc == 5 {
+            self.emit(ModRM::reg_indirect_disp8(dst.encoding(), base_enc).encode());
+            self.emit(0x00);
+        } else {
+            self.emit(ModRM::reg_indirect(dst.encoding(), base_enc).encode());
+        }
+    }
+
+    /// MOV [r64], r32 - Store 32-bit value to memory
+    pub fn mov_mem32_r32(&mut self, base: Reg64, src: Reg64) {
+        let mut rex = Rex::new();
+        if src.needs_rex_ext() {
+            rex = rex.r();
+        }
+        if base.needs_rex_ext() {
+            rex = rex.b();
+        }
+        if rex.is_needed() {
+            self.emit(rex.encode());
+        }
+        self.emit(0x89); // 89 /r - MOV r/m32, r32 (without REX.W)
+
+        let base_enc = base.encoding();
+        if base_enc == 4 {
+            self.emit(ModRM::reg_indirect(src.encoding(), 4).encode());
+            self.emit(0x24);
+        } else if base_enc == 5 {
+            self.emit(ModRM::reg_indirect_disp8(src.encoding(), base_enc).encode());
+            self.emit(0x00);
+        } else {
+            self.emit(ModRM::reg_indirect(src.encoding(), base_enc).encode());
+        }
     }
 }
 

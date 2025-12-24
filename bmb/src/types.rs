@@ -1102,8 +1102,64 @@ fn typecheck_statement(
             }
         }
 
-        Opcode::Load | Opcode::Store => {
-            // Memory operations (future expansion)
+        Opcode::Load => {
+            // load %dest %ptr - Load value from memory address in ptr
+            // Philosophy: "Omission is guessing" - explicit memory access
+            if stmt.operands.len() != 2 {
+                return Err(BmbError::TypeError {
+                    message: format!("load requires 2 operands, got {}", stmt.operands.len()),
+                });
+            }
+
+            // Get ptr type to determine loaded value type
+            let ptr_type = get_operand_type(&stmt.operands[1], env, registry)?;
+
+            // Determine the type being loaded based on pointer type
+            let loaded_type = match &ptr_type {
+                Type::Ptr(inner) | Type::Ref(inner) => (**inner).clone(),
+                Type::BmbBox(inner) => (**inner).clone(),
+                // If pointer is i32 (raw address), default to i32 load
+                Type::I32 | Type::U32 => Type::I32,
+                _ => {
+                    return Err(BmbError::TypeError {
+                        message: format!(
+                            "load requires pointer operand, got {:?}",
+                            ptr_type
+                        ),
+                    });
+                }
+            };
+
+            // Register the destination with the loaded type
+            if let Operand::Register(ref r) = stmt.operands[0] {
+                env.add_register(&r.name, loaded_type);
+            }
+        }
+
+        Opcode::Store => {
+            // store %ptr %value - Store value at memory address in ptr
+            if stmt.operands.len() != 2 {
+                return Err(BmbError::TypeError {
+                    message: format!("store requires 2 operands, got {}", stmt.operands.len()),
+                });
+            }
+
+            // Verify ptr operand is a pointer type
+            let ptr_type = get_operand_type(&stmt.operands[0], env, registry)?;
+            match &ptr_type {
+                Type::Ptr(_) | Type::Ref(_) | Type::BmbBox(_) | Type::I32 | Type::U32 => {}
+                _ => {
+                    return Err(BmbError::TypeError {
+                        message: format!(
+                            "store requires pointer as first operand, got {:?}",
+                            ptr_type
+                        ),
+                    });
+                }
+            }
+
+            // Verify value operand exists
+            let _ = get_operand_type(&stmt.operands[1], env, registry)?;
         }
 
         Opcode::Print => {

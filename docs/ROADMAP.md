@@ -3,7 +3,7 @@
 > **"Omission is guessing, and guessing is error."**
 
 **Last Updated**: 2025-12-24
-**Current Version**: v0.14.0
+**Current Version**: v0.15.0
 **Target**: v1.0.0 (Performance Transcendence)
 
 ---
@@ -17,12 +17,28 @@ This roadmap follows BMB's core principle: **no shortcuts, no guessing**. Each v
 ```
 v0.6-v0.13: Foundation (Core Language Complete)
 v0.14-v0.15: Self-Hosting Preparation (Boilerplate Reduction, Tooling)
+v0.15.1-v0.15.3: Implementation Hardening (Verify features work)
 v0.16-v0.18: Self-Hosting (Incremental Compiler in BMB)
 v0.19-v0.21: Bronze Stage (Advanced Generics & Type System)
+v0.21.1-v0.21.3: Rust Interoperability (C/Rust FFI, Cargo integration)
 v0.22-v0.24: Silver Stage (LLVM Integration)
 v0.25-v0.27: Gold Stage (Optimization)
+v0.27.1-v0.27.3: Tool Ecosystem Maturation (Package manager, IDE)
 v1.0.0: Performance Transcendence Complete 🎯
+
+Parallel Track: Benchmark Suite (Continuous from v0.22+)
 ```
+
+### Positioning Philosophy (v0.15+)
+
+> **"Difficult to learn, but highly effective."**
+
+BMB deliberately trades convenience for precision:
+- **Speed**: Contract-proven code enables aggressive optimization
+- **Safety**: Explicit contracts eliminate undefined behavior
+- **Reliability**: "Omission is guessing" prevents subtle bugs
+
+**Implicit Target**: AI-assisted development. BMB's explicit contracts provide high signal density that helps AI code generators produce correct code on the first attempt. The verbosity is not noise—it's semantic information.
 
 ### Boilerplate Reduction Strategy (v0.14+)
 
@@ -840,6 +856,108 @@ Type-level invariants automatically applied at function boundaries.
 
 ---
 
+## v0.15.1-v0.15.3: Implementation Hardening 🔧
+
+> **Goal**: Verify all documented features actually work in codegen, not just parsing.
+>
+> **Problem Identified**: Gap analysis revealed ~40% of documented features parse correctly but fail in code generation or runtime. This phase audits and fixes implementation completeness.
+
+### v0.15.1: String & Memory Operations
+
+| Task | Priority | Current State | Target |
+|------|----------|---------------|--------|
+| String concat codegen | Critical | Parses only | WASM + x64 working |
+| String slice operations | Critical | Parses only | Bounds-checked slicing |
+| `load`/`store` all types | Critical | Partial | All primitive + compound types |
+| Array initialization | High | Partial | Static + dynamic init |
+| Struct field access | High | Partial | Full codegen |
+
+**Verification Method**:
+```bash
+# Each feature must have:
+# 1. Parsing test (already exists)
+# 2. Type checking test
+# 3. WASM codegen test (execute with wasmtime)
+# 4. x64 codegen test (execute natively)
+
+cargo test test_string_concat_wasm
+cargo test test_string_concat_x64
+cargo test test_load_store_all_types
+```
+
+**Success Criteria**:
+- `String` operations work end-to-end
+- `load`/`store` works for i8-i64, f32, f64, bool, arrays, structs
+- 100% of v0.9.0 String features actually execute
+
+### v0.15.2: Module & FFI Verification
+
+| Task | Priority | Current State | Target |
+|------|----------|---------------|--------|
+| `@use`/`@import` codegen | Critical | Spec only | Multi-file compilation |
+| Qualified calls | High | Spec only | Cross-module function calls |
+| `@extern` WASM imports | High | Partial | Full host function binding |
+| `@extern` native linking | Medium | Scaffold | Linux/Windows/macOS linking |
+
+**Test Suite**:
+```bmb
+# tests/examples/multi_module/main.bmb
+@use math
+
+@node test_import
+@params x:i32
+@returns i32
+  call %r math::square x
+  ret %r
+```
+
+```bmb
+# tests/examples/multi_module/math.bmb
+@pub
+@node square
+@params n:i32
+@returns i32
+@post ret == n * n
+  mul %r n n
+  ret %r
+```
+
+**Success Criteria**:
+- Multi-file compilation produces single WASM/ELF
+- `@extern` functions can call libc
+- Import resolution errors are clear
+
+### v0.15.3: Implementation Completeness Audit
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| Feature Matrix | Critical | Document implemented vs documented |
+| Codegen Coverage | Critical | Every AST node → codegen test |
+| Native Backend Audit | High | x64/ARM64 completeness check |
+| Documentation Alignment | High | Update docs to match reality |
+
+**Audit Deliverables**:
+
+```markdown
+# Implementation Status Report (v0.15.3)
+
+| Feature | Parser | TypeCheck | WASM | x64 | ARM64 |
+|---------|--------|-----------|------|-----|-------|
+| i32 arithmetic | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| String ops | ✅ | ✅ | ⚠️ | ❌ | ❌ |
+| @extern C | ✅ | ✅ | ✅ | ⚠️ | ❌ |
+| Modules | ✅ | ⚠️ | ❌ | ❌ | ❌ |
+| ... | ... | ... | ... | ... | ... |
+```
+
+**Success Criteria**:
+- Complete feature matrix published
+- All ✅ features have integration tests
+- Documentation matches implementation
+- Roadmap updated with realistic timelines
+
+---
+
 ## v0.16.0: Lexer & Tokenizer in BMB
 
 **Goal**: First compiler component written in BMB (Ghuloum Phase 1)
@@ -1194,6 +1312,165 @@ Generic Contract          │ Instantiated Contract
 
 ---
 
+## Rust Interoperability (v0.21.1 - v0.21.3): Ecosystem Bridge 🦀
+
+> **Strategic Goal**: Address ecosystem gap by enabling BMB ↔ Rust interoperability.
+>
+> BMB has no ecosystem alone. Rust has crates.io with 150,000+ packages. This phase bridges BMB to Rust's ecosystem, enabling gradual adoption without sacrificing BMB's contract guarantees.
+
+### v0.21.1: C ABI Foundation
+
+| Task | Priority | Description | Research Basis |
+|------|----------|-------------|----------------|
+| `#[repr(C)]` equivalent | Critical | Explicit struct layout control | Rust FFI |
+| Name mangling control | Critical | `@no_mangle` annotation | cbindgen |
+| Calling convention enforcement | Critical | Validate @extern ABI | LLVM ABI |
+| C header generation | High | `bmbc emit-header` command | cbindgen |
+
+**Syntax Extensions**:
+```bmb
+# Explicit C-compatible layout
+@repr C
+@struct Point
+  x: f64
+  y: f64
+
+# No name mangling - symbol exactly as written
+@no_mangle
+@pub
+@extern "C"
+@node calculate_distance
+@params p1:*Point p2:*Point
+@returns f64
+@pre valid(p1) && valid(p2)
+  # ... implementation
+```
+
+**Header Generation**:
+```bash
+bmbc emit-header lib.bmb -o lib.h
+
+# Generated:
+# typedef struct { double x; double y; } Point;
+# double calculate_distance(const Point* p1, const Point* p2);
+```
+
+**Success Criteria**:
+- C libraries can call BMB functions
+- BMB can call C libraries via @extern
+- struct layouts match C expectations
+
+### v0.21.2: Rust Type Mapping
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| Primitive type mapping | Critical | i32↔i32, bool↔bool, etc. |
+| Option<T> interop | High | BMB Option ↔ Rust Option (repr(C)) |
+| Result<T,E> interop | High | BMB Result ↔ Rust Result |
+| Slice/reference mapping | High | &[T] ↔ Slice<T> |
+| String mapping | Medium | Str ↔ &str (via ptr+len) |
+
+**Type Mapping Table**:
+```
+BMB Type        │ Rust Type           │ C ABI Representation
+────────────────│─────────────────────│──────────────────────
+i32, u64, ...   │ i32, u64, ...       │ Direct (same)
+bool            │ bool                │ u8 (0 or 1)
+*T              │ *const T / *mut T   │ Pointer
+&T              │ &T                  │ Pointer (non-null)
+Option<T>       │ Option<T>           │ (discriminant, T) or null-ptr opt
+Result<T,E>     │ Result<T,E>         │ (discriminant, union{T,E})
+Str             │ &str                │ (*const u8, usize)
+String          │ String              │ Opaque (via FFI helpers)
+```
+
+**Contract Preservation at FFI Boundary**:
+```bmb
+# When calling Rust, BMB inserts contract checks
+@extern "rust"
+@from "mylib"
+@node rust_divide
+@params a:i32 b:i32
+@returns i32
+@pre b != 0      # BMB verifies BEFORE calling Rust
+@post ret * b == a  # BMB verifies AFTER Rust returns
+
+# This is "Omission is guessing" applied to FFI
+# We don't trust Rust's implicit behavior - we verify explicitly
+```
+
+**Success Criteria**:
+- Rust `#[no_std]` crates usable from BMB
+- BMB libraries usable from Rust
+- Contract violations at boundary are caught
+
+### v0.21.3: Cargo Integration
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| `cargo-bmb` subcommand | Critical | Build BMB within Cargo |
+| build.rs integration | Critical | Compile .bmb files in Rust projects |
+| Dependency management | High | Reference BMB crates from Cargo.toml |
+| Mixed Rust/BMB projects | High | Seamless compilation |
+
+**cargo-bmb Workflow**:
+```toml
+# Cargo.toml
+[package]
+name = "my_project"
+
+[dependencies]
+my_bmb_lib = { path = "./bmb_lib" }
+
+[build-dependencies]
+bmb-build = "0.21"
+```
+
+```rust
+// build.rs
+fn main() {
+    bmb_build::compile("src/core.bmb")
+        .verify(bmb_build::Level::Silver)
+        .emit_rust_bindings("src/core_bindings.rs")
+        .run();
+}
+```
+
+```rust
+// src/main.rs
+mod core_bindings;
+
+fn main() {
+    // Call BMB function from Rust
+    let result = core_bindings::my_bmb_function(42);
+    println!("Result: {}", result);
+}
+```
+
+**BMB Package Format**:
+```toml
+# bmb.toml (BMB package manifest, Cargo-compatible structure)
+[package]
+name = "my_bmb_lib"
+version = "0.1.0"
+verification_level = "silver"
+
+[dependencies]
+std = { version = "0.21" }
+
+[rust-interop]
+generate_bindings = true
+generate_headers = true
+```
+
+**Success Criteria**:
+- `cargo bmb build` compiles BMB sources
+- Rust projects can depend on BMB packages
+- `cargo bmb test` runs contract verification
+- Mixed-language debugging works
+
+---
+
 ## Silver Stage (v0.22 - v0.24): LLVM Integration
 
 **Goal**: Translate contract knowledge into LLVM optimization hints
@@ -1378,6 +1655,221 @@ _recurse:
 
 ---
 
+## Tool Ecosystem Maturation (v0.27.1 - v0.27.3): Developer Experience 🛠️
+
+> **Goal**: Transform BMB from a research language to a production-ready tool.
+>
+> Without good tooling, even the best language fails adoption. This phase builds the developer experience that makes BMB practical for real projects.
+
+### v0.27.1: Package Manager Enhancement
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| Registry backend | Critical | Central package registry (gotgan.bmb.dev) |
+| Semantic versioning | Critical | Contract-aware version resolution |
+| Lock file format | High | Reproducible builds |
+| Private registries | Medium | Enterprise deployment support |
+
+**Package Resolution with Contracts**:
+```toml
+# bmb.toml
+[dependencies]
+http = "^1.0"  # Standard semver
+math = { version = "^2.0", verify = "gold" }  # Require Gold verification
+```
+
+```bash
+# Package manager commands
+gotgan add http --verify silver
+gotgan update --verify-deps
+gotgan publish --verify gold  # Must pass Gold verification to publish
+```
+
+**Contract-Aware Versioning Rules**:
+```
+Major (X.0.0): Contract changes (breaking @pre/@post)
+Minor (0.X.0): New features, non-breaking contract additions
+Patch (0.0.X): Bug fixes, implementation changes (contracts unchanged)
+```
+
+**Success Criteria**:
+- `gotgan add/remove/update` works reliably
+- Contract verification integrated into publish
+- Private registry deployment documented
+
+### v0.27.2: IDE & LSP Enhancement
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| VS Code extension | Critical | Full-featured BMB extension |
+| Contract visualization | High | Inline @pre/@post display |
+| Verification status | High | Real-time SMT feedback |
+| IntelliJ plugin | Medium | JetBrains family support |
+| Neovim LSP config | Medium | Terminal-based development |
+
+**VS Code Features**:
+```json
+// .vscode/extensions/bmb/features
+{
+  "inlineContractHints": true,
+  "verificationStatusBar": true,
+  "smtCounterexampleViewer": true,
+  "contractCompletions": true,
+  "quickFixSuggestions": true
+}
+```
+
+**Contract Visualization**:
+```
+┌─────────────────────────────────────────────────────┐
+│ @node divide                                        │
+│ @params a:i32 b:nz_i32   ◀── [nz_i32: self != 0]   │
+│ @returns i32                                        │
+│ @post ret * b == a       ◀── [✓ Verified by SMT]   │
+│                                                     │
+│   div %r a b                                        │
+│   ret %r                                            │
+└─────────────────────────────────────────────────────┘
+```
+
+**Success Criteria**:
+- VS Code extension with 1-click install
+- Real-time verification feedback (<2s latency)
+- Counterexample visualization works
+
+### v0.27.3: Debugging & Profiling
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| DWARF debug info | Critical | Source-level debugging |
+| GDB/LLDB integration | Critical | Breakpoints, stepping |
+| Contract-aware debugger | High | Show active @pre/@post |
+| Performance profiler | Medium | Contract overhead analysis |
+| Memory profiler | Medium | Allocation tracking |
+
+**Debugging Example**:
+```bash
+# Compile with debug info
+bmbc compile program.bmb -g -o program
+
+# Debug with GDB
+gdb program
+(gdb) break main
+(gdb) run
+(gdb) info contracts  # BMB extension: show active contracts
+(gdb) verify          # BMB extension: check current @pre
+```
+
+**Contract-Aware Debugging**:
+```
+Breakpoint 1, divide (a=10, b=0) at program.bmb:15
+Contract violation: @pre b != 0
+  Parameter b = 0 violates precondition
+
+Call stack:
+  #0 divide(a=10, b=0) at program.bmb:15
+  #1 main() at program.bmb:25
+```
+
+**Success Criteria**:
+- Source-level debugging works on Linux/macOS/Windows
+- Contract violations show clear error messages
+- Profiler identifies contract overhead
+
+---
+
+## Benchmark Suite (Parallel Track v0.22+): Proof of Claims 📊
+
+> **Strategic Imperative**: Claims without evidence are marketing, not engineering.
+>
+> BMB claims "Performance Transcendence" - surpassing C/Rust. This must be proven, not asserted. The benchmark suite runs continuously from v0.22 onwards.
+
+### Benchmark Categories
+
+| Category | Description | Comparison Targets |
+|----------|-------------|-------------------|
+| **Microbenchmarks** | Single operations (arithmetic, memory) | C, Rust, Zig |
+| **Kernels** | Compute kernels (matrix, FFT, sort) | C, Rust, Fortran |
+| **Real Programs** | Actual applications (parsers, compressors) | C, Rust implementations |
+| **Contract Overhead** | Cost of verification | With/without contracts |
+
+### Benchmark Suite Structure
+
+```
+benchmarks/
+├── micro/
+│   ├── arithmetic.bmb      # Basic ops
+│   ├── memory.bmb          # Load/store patterns
+│   └── control_flow.bmb    # Branching
+├── kernels/
+│   ├── matrix_mul.bmb      # Dense matrix multiply
+│   ├── quicksort.bmb       # Sorting
+│   ├── sha256.bmb          # Hashing
+│   └── json_parse.bmb      # Parsing
+├── baseline/
+│   ├── c/                  # C implementations
+│   ├── rust/               # Rust implementations
+│   └── zig/                # Zig implementations
+└── results/
+    ├── 2024-Q1.json
+    └── latest.json
+```
+
+### Continuous Benchmarking
+
+```yaml
+# .github/workflows/benchmark.yml
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly
+
+jobs:
+  benchmark:
+    runs-on: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - run: bmbc bench benchmarks/ --compare baseline/
+      - run: |
+          if [ $(cat results/latest.json | jq '.regression_detected') == "true" ]; then
+            exit 1  # Fail on performance regression
+          fi
+```
+
+### Performance Tracking Dashboard
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ BMB Performance Tracker                          v0.25.0    │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Matrix Multiply (1024x1024)                                │
+│  ├─ C (gcc -O3):        1.00x (baseline)                   │
+│  ├─ Rust (release):     0.98x                              │
+│  ├─ BMB (no contracts): 1.02x                              │
+│  └─ BMB (verified):     0.97x                              │
+│                                                             │
+│  Quicksort (1M elements)                                    │
+│  ├─ C (gcc -O3):        1.00x                              │
+│  ├─ Rust (release):     1.05x                              │
+│  ├─ BMB (no contracts): 1.08x  ← Contract elimination win  │
+│  └─ BMB (verified):     1.01x                              │
+│                                                             │
+│  Overall Status: 🟡 Parity (target: 🟢 Transcendence)       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Success Metrics by Version
+
+| Version | Target | Metric |
+|---------|--------|--------|
+| v0.22.0 | Parity | BMB ≥ 0.8x C on 50% of benchmarks |
+| v0.24.0 | Close | BMB ≥ 0.95x C on 80% of benchmarks |
+| v0.26.0 | Match | BMB ≥ 1.0x C on 90% of benchmarks |
+| v1.0.0 | Transcend | BMB > 1.0x C on verified code paths |
+
+---
+
 ## v1.0.0: Performance Transcendence Complete 🎯
 
 | Capability | C | Rust | BMB |
@@ -1453,6 +1945,11 @@ Example: Array access
 | Memory model complexity | High | High | Start simple, extend gradually |
 | FFI type mapping | Medium | Medium | Limit to simple types first |
 | Performance regression | Medium | Medium | Continuous benchmarking |
+| **Implementation gap** | **High** | **High** | v0.15.1-v0.15.3 Hardening phase |
+| **Rust interop complexity** | Medium | High | Start with C ABI, layer Rust on top |
+| **Ecosystem adoption** | High | Critical | Cargo integration, gradual migration path |
+| **Benchmark credibility** | Medium | High | Third-party reproducible benchmarks |
+| **Tooling debt** | High | Medium | Dedicated v0.27.1-v0.27.3 phase |
 
 ---
 
@@ -1460,6 +1957,7 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 15.1 | 2025-12-24 | **Major Roadmap Restructure**: Added 4 new phase groups addressing identified gaps. (1) v0.15.1-v0.15.3 Implementation Hardening - verify documented features work. (2) v0.21.1-v0.21.3 Rust Interoperability - C ABI, Rust type mapping, Cargo integration. (3) v0.27.1-v0.27.3 Tool Ecosystem Maturation - package manager, IDE/LSP, debugging. (4) Benchmark Suite parallel track from v0.22+. Added "Positioning Philosophy" section. Updated Risk Register with 5 new risks. |
 | 15.0 | 2025-12-24 | v0.15.0 Complete: Exhaustiveness checking for pattern matching (Maranget-style usefulness algorithm), integration tests for non-exhaustive patterns, example BMB programs for @match. String operations deferred to v0.15.1. |
 | 14.0 | 2025-12-24 | v0.14.0 Complete: Contract Inference system with frame analysis (@modifies) and postcondition suggestions. Boilerplate reduction through intelligent inference. |
 | 13.0 | 2025-12-24 | v0.13.0 Complete: Box<T>/unbox/drop opcodes, enhanced Span, ErrorCollector, File I/O abstraction, CLI argument parser. **Roadmap restructured**: Added v0.14 (Contract Inference), v0.15 (Pattern Matching), v0.16-v0.18 (Self-Hosting phases). Bronze→v0.19-v0.21, Silver→v0.22-v0.24, Gold→v0.25-v0.27. Added Boilerplate Reduction Strategy section. |

@@ -732,9 +732,201 @@ impl CodeGenerator {
                 }
             }
 
-            Opcode::Load | Opcode::Store => {
-                // Memory operations - future expansion for linear memory
-                // For now, treat as no-op (BMB uses registers, not heap memory)
+            Opcode::Load => {
+                // load %dest %ptr - Load value from memory at address in %ptr
+                // Philosophy: "Omission is guessing" - explicit memory access
+                //
+                // Operands: [dest_register, ptr_register]
+                // 1. Get address from ptr register
+                // 2. Load value from memory[address]
+                // 3. Store result in dest register
+
+                // Determine the type to load based on destination register or pointer type
+                let load_type = if let Operand::Register(r) = &stmt.operands[0] {
+                    ctx.register_types
+                        .get(&r.name)
+                        .cloned()
+                        .unwrap_or(Type::I32)
+                } else if let Operand::Register(r) = &stmt.operands[1] {
+                    // Try to get inner type from pointer type
+                    if let Some(Type::Ptr(inner)) = ctx.register_types.get(&r.name) {
+                        (**inner).clone()
+                    } else {
+                        Type::I32
+                    }
+                } else {
+                    Type::I32
+                };
+
+                // Get destination register index
+                let dest_idx = if let Operand::Register(r) = &stmt.operands[0] {
+                    *ctx.locals.get(&r.name).unwrap_or(&0)
+                } else {
+                    return Err(BmbError::CodegenError {
+                        message: "load: destination must be a register".to_string(),
+                    });
+                };
+
+                // Load the address from ptr register
+                self.generate_operand(&stmt.operands[1], func, ctx)?;
+
+                // Generate appropriate load instruction based on type
+                match load_type {
+                    Type::I8 => {
+                        func.instruction(&Instruction::I32Load8S(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 0,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::U8 | Type::Bool => {
+                        func.instruction(&Instruction::I32Load8U(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 0,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I16 => {
+                        func.instruction(&Instruction::I32Load16S(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 1,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::U16 => {
+                        func.instruction(&Instruction::I32Load16U(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 1,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I32 | Type::U32 | Type::Char | Type::Enum(_) | Type::Ptr(_) | Type::Ref(_) => {
+                        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I64 | Type::U64 => {
+                        func.instruction(&Instruction::I64Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::F32 => {
+                        func.instruction(&Instruction::F32Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::F64 => {
+                        func.instruction(&Instruction::F64Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
+                    }
+                    _ => {
+                        // Default to i32 load for unknown types
+                        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                }
+
+                // Store result in destination register
+                func.instruction(&Instruction::LocalSet(dest_idx));
+            }
+
+            Opcode::Store => {
+                // store %ptr %value - Store value at memory address in %ptr
+                // Philosophy: "Omission is guessing" - explicit memory writes
+                //
+                // Operands: [ptr_register, value_operand]
+                // 1. Get address from ptr register
+                // 2. Get value to store
+                // 3. Store value at memory[address]
+
+                // Determine the type to store based on value operand
+                let store_type = if let Operand::Register(r) = &stmt.operands[1] {
+                    ctx.register_types
+                        .get(&r.name)
+                        .cloned()
+                        .unwrap_or(Type::I32)
+                } else if let Operand::Register(r) = &stmt.operands[0] {
+                    // Try to get inner type from pointer type
+                    if let Some(Type::Ptr(inner)) = ctx.register_types.get(&r.name) {
+                        (**inner).clone()
+                    } else {
+                        Type::I32
+                    }
+                } else {
+                    Type::I32 // Default for literals
+                };
+
+                // Load address onto stack first
+                self.generate_operand(&stmt.operands[0], func, ctx)?;
+
+                // Load value onto stack
+                self.generate_operand(&stmt.operands[1], func, ctx)?;
+
+                // Generate appropriate store instruction based on type
+                match store_type {
+                    Type::I8 | Type::U8 | Type::Bool => {
+                        func.instruction(&Instruction::I32Store8(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 0,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I16 | Type::U16 => {
+                        func.instruction(&Instruction::I32Store16(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 1,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I32 | Type::U32 | Type::Char | Type::Enum(_) | Type::Ptr(_) | Type::Ref(_) => {
+                        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I64 | Type::U64 => {
+                        func.instruction(&Instruction::I64Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::F32 => {
+                        func.instruction(&Instruction::F32Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::F64 => {
+                        func.instruction(&Instruction::F64Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
+                    }
+                    _ => {
+                        // Default to i32 store for unknown types
+                        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                }
             }
 
             Opcode::Print => {
@@ -1525,8 +1717,45 @@ impl CodeGenerator {
                     message: "Jump instructions not supported in match arms".to_string(),
                 });
             }
-            Opcode::Load | Opcode::Store => {
-                // Memory operations - no-op for now
+            Opcode::Load => {
+                // load %dest %ptr - Load value from memory at address in %ptr
+                // Simplified version for match arms (no full type inference)
+                let dest_idx = if let Operand::Register(r) = &stmt.operands[0] {
+                    *ctx.locals.get(&r.name).unwrap_or(&0)
+                } else {
+                    return Err(BmbError::CodegenError {
+                        message: "load: destination must be a register".to_string(),
+                    });
+                };
+
+                // Load address from ptr register
+                self.generate_operand(&stmt.operands[1], func, ctx)?;
+
+                // Default to i32 load in match arms (type inference limited)
+                func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+                    offset: 0,
+                    align: 2,
+                    memory_index: 0,
+                }));
+
+                func.instruction(&Instruction::LocalSet(dest_idx));
+            }
+            Opcode::Store => {
+                // store %ptr %value - Store value at memory address in %ptr
+                // Simplified version for match arms
+
+                // Load address
+                self.generate_operand(&stmt.operands[0], func, ctx)?;
+
+                // Load value
+                self.generate_operand(&stmt.operands[1], func, ctx)?;
+
+                // Default to i32 store in match arms
+                func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+                    offset: 0,
+                    align: 2,
+                    memory_index: 0,
+                }));
             }
             Opcode::Print => {
                 return Err(BmbError::CodegenError {
