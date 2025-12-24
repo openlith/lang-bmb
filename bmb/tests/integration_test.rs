@@ -2011,3 +2011,288 @@ fn test_pub_visibility_backwards_compatibility() {
     assert!(export_names.contains(&"func_a"), "Legacy function 'func_a' should be exported");
     assert!(export_names.contains(&"func_b"), "Legacy function 'func_b' should be exported");
 }
+
+// =============================================================================
+// Pattern Matching Tests (@match) - v0.13+
+// =============================================================================
+
+#[test]
+fn test_match_literal_patterns() {
+    // Test @match with literal integer patterns
+    let source = r#"
+# Pattern matching with literal patterns
+@node classify
+@params x:i32
+@returns i32
+
+  @match %x
+    @case 0:
+      ret 100
+    @case 1:
+      ret 200
+    @case 42:
+      ret 999
+    @default:
+      ret 0
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let classify = instance
+        .get_typed_func::<i32, i32>(&mut store, "classify")
+        .expect("classify function not found");
+
+    // Test pattern matches
+    assert_eq!(classify.call(&mut store, 0).unwrap(), 100);
+    assert_eq!(classify.call(&mut store, 1).unwrap(), 200);
+    assert_eq!(classify.call(&mut store, 42).unwrap(), 999);
+
+    // Test default case
+    assert_eq!(classify.call(&mut store, 2).unwrap(), 0);
+    assert_eq!(classify.call(&mut store, 100).unwrap(), 0);
+    assert_eq!(classify.call(&mut store, -1).unwrap(), 0);
+}
+
+#[test]
+fn test_match_bool_patterns() {
+    // Test @match with boolean literal patterns
+    let source = r#"
+# Pattern matching with boolean patterns
+@node bool_to_int
+@params b:bool
+@returns i32
+
+  @match %b
+    @case true:
+      ret 1
+    @case false:
+      ret 0
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let bool_to_int = instance
+        .get_typed_func::<i32, i32>(&mut store, "bool_to_int")
+        .expect("bool_to_int function not found");
+
+    // In WASM, bool is i32 (0 = false, non-zero = true)
+    assert_eq!(bool_to_int.call(&mut store, 1).unwrap(), 1);  // true
+    assert_eq!(bool_to_int.call(&mut store, 0).unwrap(), 0);  // false
+}
+
+#[test]
+fn test_match_with_computation() {
+    // Test @match arms that do computation before returning
+    let source = r#"
+# Pattern matching with computation in arms
+@node double_if_small
+@params x:i32
+@returns i32
+
+  @match %x
+    @case 0:
+      ret 0
+    @case 1:
+      mov %r 2
+      ret %r
+    @case 2:
+      mov %r 4
+      ret %r
+    @default:
+      mul %r %x 2
+      ret %r
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let double_if_small = instance
+        .get_typed_func::<i32, i32>(&mut store, "double_if_small")
+        .expect("double_if_small function not found");
+
+    assert_eq!(double_if_small.call(&mut store, 0).unwrap(), 0);
+    assert_eq!(double_if_small.call(&mut store, 1).unwrap(), 2);
+    assert_eq!(double_if_small.call(&mut store, 2).unwrap(), 4);
+    assert_eq!(double_if_small.call(&mut store, 10).unwrap(), 20);
+    assert_eq!(double_if_small.call(&mut store, 50).unwrap(), 100);
+}
+
+#[test]
+fn test_match_enum_variants() {
+    // Test @match with enum variant patterns
+    let source = r#"
+# Simple enum for testing
+@enum Color
+  Red
+  Green
+  Blue
+
+# Pattern matching with enum variants
+@node color_value
+@params c:Color
+@returns i32
+
+  @match %c
+    @case Color::Red:
+      ret 1
+    @case Color::Green:
+      ret 2
+    @case Color::Blue:
+      ret 3
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let color_value = instance
+        .get_typed_func::<i32, i32>(&mut store, "color_value")
+        .expect("color_value function not found");
+
+    // Enum variants are represented as i32 discriminants (0, 1, 2)
+    assert_eq!(color_value.call(&mut store, 0).unwrap(), 1);  // Red
+    assert_eq!(color_value.call(&mut store, 1).unwrap(), 2);  // Green
+    assert_eq!(color_value.call(&mut store, 2).unwrap(), 3);  // Blue
+}
+
+// =============================================================================
+// Box<T> Heap Allocation Tests (v0.13+)
+// =============================================================================
+
+#[test]
+fn test_box_simple_i32() {
+    // Test basic box/unbox cycle with i32
+    let source = r#"
+@node box_test
+@params value:i32
+@returns i32
+
+  box %boxed %value
+  unbox %result %boxed
+  ret %result
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let box_test = instance
+        .get_typed_func::<i32, i32>(&mut store, "box_test")
+        .expect("box_test function not found");
+
+    // Test with various values
+    assert_eq!(box_test.call(&mut store, 42).unwrap(), 42);
+    assert_eq!(box_test.call(&mut store, -100).unwrap(), -100);
+    assert_eq!(box_test.call(&mut store, 0).unwrap(), 0);
+    assert_eq!(box_test.call(&mut store, i32::MAX).unwrap(), i32::MAX);
+    assert_eq!(box_test.call(&mut store, i32::MIN).unwrap(), i32::MIN);
+}
+
+#[test]
+fn test_box_multiple_allocations() {
+    // Test multiple box allocations to verify heap pointer advances correctly
+    let source = r#"
+@node multi_box
+@params a:i32 b:i32
+@returns i32
+
+  box %box_a %a
+  box %box_b %b
+  unbox %val_a %box_a
+  unbox %val_b %box_b
+  add %result %val_a %val_b
+  ret %result
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let multi_box = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "multi_box")
+        .expect("multi_box function not found");
+
+    // Test that both values are preserved correctly
+    assert_eq!(multi_box.call(&mut store, (10, 20)).unwrap(), 30);
+    assert_eq!(multi_box.call(&mut store, (100, -50)).unwrap(), 50);
+}
+
+#[test]
+fn test_box_with_drop() {
+    // Test that drop opcode doesn't break anything (no-op with bump allocator)
+    let source = r#"
+@node box_drop_test
+@params value:i32
+@returns i32
+
+  box %boxed %value
+  unbox %result %boxed
+  drop %boxed
+  ret %result
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let box_drop_test = instance
+        .get_typed_func::<i32, i32>(&mut store, "box_drop_test")
+        .expect("box_drop_test function not found");
+
+    // Value should still be retrievable (drop is no-op with bump allocator)
+    assert_eq!(box_drop_test.call(&mut store, 42).unwrap(), 42);
+}
+
+#[test]
+fn test_box_returns_pointer() {
+    // Test that box returns a valid heap pointer (should be >= 1024)
+    let source = r#"
+@node box_ptr
+@params value:i32
+@returns Box<i32>
+
+  box %boxed %value
+  ret %boxed
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let box_ptr = instance
+        .get_typed_func::<i32, i32>(&mut store, "box_ptr")
+        .expect("box_ptr function not found");
+
+    // Box pointer should be at heap start (1024)
+    let ptr = box_ptr.call(&mut store, 42).unwrap();
+    assert!(ptr >= 1024, "Box pointer should be >= 1024, got {}", ptr);
+}

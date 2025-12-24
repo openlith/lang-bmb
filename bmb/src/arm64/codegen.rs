@@ -113,6 +113,9 @@ impl Arm64Codegen {
                 Instruction::Statement(stmt) => {
                     self.compile_statement(stmt)?;
                 }
+                Instruction::Match(_) => {
+                    todo!("Pattern matching not yet implemented for ARM64")
+                }
             }
         }
 

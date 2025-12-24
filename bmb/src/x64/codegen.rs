@@ -386,6 +386,10 @@ impl X64Codegen {
                 Instruction::Statement(stmt) => {
                     temp_offset += self.estimate_stmt_size(stmt);
                 }
+                Instruction::Match(_) => {
+                    // TODO: Pattern matching codegen - estimate size
+                    temp_offset += 64; // Conservative estimate for match statement
+                }
             }
         }
 
@@ -406,6 +410,11 @@ impl X64Codegen {
                         });
                     }
                     self.compile_statement(stmt)?;
+                }
+                Instruction::Match(_) => {
+                    return Err(BmbError::CodegenError {
+                        message: "Pattern matching not yet supported in Windows PE codegen".to_string(),
+                    });
                 }
             }
         }
@@ -533,6 +542,10 @@ impl X64Codegen {
                     // Estimate instruction size (rough approximation)
                     temp_offset += self.estimate_stmt_size(stmt);
                 }
+                Instruction::Match(_) => {
+                    // TODO: Pattern matching codegen - estimate size
+                    temp_offset += 64; // Conservative estimate for match statement
+                }
             }
         }
 
@@ -545,6 +558,11 @@ impl X64Codegen {
                 }
                 Instruction::Statement(stmt) => {
                     self.compile_statement(stmt)?;
+                }
+                Instruction::Match(_) => {
+                    return Err(BmbError::CodegenError {
+                        message: "Pattern matching not yet supported in ELF64 codegen".to_string(),
+                    });
                 }
             }
         }
@@ -669,6 +687,9 @@ impl X64Codegen {
                 message: "Memory operations not yet implemented".to_string(),
             }),
             Opcode::Print => self.compile_print(stmt),
+            Opcode::Box | Opcode::Unbox | Opcode::Drop => Err(BmbError::CodegenError {
+                message: "Heap allocation operations not yet implemented for x64".to_string(),
+            }),
         }
     }
 

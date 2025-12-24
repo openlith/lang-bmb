@@ -874,6 +874,19 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type> {
                     }
                     Ok(Type::Slice(Box::new(type_args.into_iter().next().unwrap())))
                 }
+                "Box" => {
+                    if type_args.len() != 1 {
+                        return Err(BmbError::ParseError {
+                            line: 0,
+                            column: 0,
+                            message: format!(
+                                "Box requires exactly 1 type argument, got {}",
+                                type_args.len()
+                            ),
+                        });
+                    }
+                    Ok(Type::BmbBox(Box::new(type_args.into_iter().next().unwrap())))
+                }
                 _ => Err(BmbError::ParseError {
                     line: 0,
                     column: 0,
@@ -928,11 +941,235 @@ fn parse_body(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Instruction>> {
             Rule::stmt => {
                 instructions.push(Instruction::Statement(parse_statement(item)?));
             }
+            Rule::match_stmt => {
+                instructions.push(Instruction::Match(parse_match_stmt(item)?));
+            }
             _ => {}
         }
     }
 
     Ok(instructions)
+}
+
+/// Parse a @match statement
+fn parse_match_stmt(pair: pest::iterators::Pair<Rule>) -> Result<MatchStmt> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    // First element is the scrutinee register
+    let scrutinee_pair = inner.next().ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Expected scrutinee register in @match".to_string(),
+    })?;
+    let scrutinee = scrutinee_pair.as_str().trim_start_matches('%').to_string();
+
+    let mut arms = Vec::new();
+    let mut default = None;
+
+    for item in inner {
+        match item.as_rule() {
+            Rule::match_arm => {
+                arms.push(parse_match_arm(item)?);
+            }
+            Rule::match_default => {
+                default = Some(parse_match_default(item)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(MatchStmt {
+        scrutinee,
+        arms,
+        default,
+        span,
+    })
+}
+
+/// Parse a @case arm
+fn parse_match_arm(pair: pest::iterators::Pair<Rule>) -> Result<MatchArm> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    // First element is the pattern
+    let pattern_pair = inner.next().ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Expected pattern in @case".to_string(),
+    })?;
+    let pattern = parse_pattern(pattern_pair)?;
+
+    // Second element is the match_body
+    let body_pair = inner.next().ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Expected body in @case".to_string(),
+    })?;
+    let body = parse_match_body(body_pair)?;
+
+    Ok(MatchArm { pattern, body, span })
+}
+
+/// Parse @default arm
+fn parse_match_default(pair: pest::iterators::Pair<Rule>) -> Result<MatchDefault> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    // Only element is the match_body
+    let body_pair = inner.next().ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Expected body in @default".to_string(),
+    })?;
+    let body = parse_match_body(body_pair)?;
+
+    Ok(MatchDefault { body, span })
+}
+
+/// Parse match body (similar to parse_body but simpler, no nested match)
+fn parse_match_body(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Instruction>> {
+    let mut instructions = Vec::new();
+
+    for item in pair.into_inner() {
+        match item.as_rule() {
+            Rule::label => {
+                let text = item.as_str();
+                let name = &text[1..text.len() - 1];
+                let span = pair_to_span(&item);
+                instructions.push(Instruction::Label(Identifier::new(name, span)));
+            }
+            Rule::stmt => {
+                instructions.push(Instruction::Statement(parse_statement(item)?));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(instructions)
+}
+
+/// Parse a pattern (variant or literal)
+fn parse_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern> {
+    let span = pair_to_span(&pair);
+    let inner = pair.into_inner().next().ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Expected pattern content".to_string(),
+    })?;
+
+    match inner.as_rule() {
+        Rule::variant_pattern => parse_variant_pattern(inner),
+        Rule::literal_pattern => parse_literal_pattern(inner),
+        _ => Err(BmbError::ParseError {
+            line: span.line,
+            column: span.column,
+            message: format!("Unexpected pattern type: {:?}", inner.as_rule()),
+        }),
+    }
+}
+
+/// Parse variant pattern: EnumName::Variant or EnumName::Variant(%binding)
+fn parse_variant_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let enum_name_pair = inner.next().ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Expected enum name in variant pattern".to_string(),
+    })?;
+    let enum_name = Identifier::new(enum_name_pair.as_str(), pair_to_span(&enum_name_pair));
+
+    let variant_name_pair = inner.next().ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Expected variant name in variant pattern".to_string(),
+    })?;
+    let variant_name = Identifier::new(variant_name_pair.as_str(), pair_to_span(&variant_name_pair));
+
+    // Optional binding
+    let binding = inner.next().map(|p| p.as_str().trim_start_matches('%').to_string());
+
+    Ok(Pattern::Variant {
+        enum_name,
+        variant_name,
+        binding,
+        span,
+    })
+}
+
+/// Parse literal pattern: int, bool, or char
+fn parse_literal_pattern(pair: pest::iterators::Pair<Rule>) -> Result<Pattern> {
+    let span = pair_to_span(&pair);
+    let inner = pair.into_inner().next().ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Expected literal value in pattern".to_string(),
+    })?;
+
+    let value = match inner.as_rule() {
+        Rule::int_literal => {
+            let s = inner.as_str();
+            let n: i64 = if s.starts_with("0x") || s.starts_with("0X") {
+                i64::from_str_radix(&s[2..], 16).map_err(|e| BmbError::ParseError {
+                    line: span.line,
+                    column: span.column,
+                    message: format!("Invalid hex literal: {}", e),
+                })?
+            } else if s.starts_with("0b") || s.starts_with("0B") {
+                i64::from_str_radix(&s[2..], 2).map_err(|e| BmbError::ParseError {
+                    line: span.line,
+                    column: span.column,
+                    message: format!("Invalid binary literal: {}", e),
+                })?
+            } else {
+                s.parse().map_err(|e| BmbError::ParseError {
+                    line: span.line,
+                    column: span.column,
+                    message: format!("Invalid integer literal: {}", e),
+                })?
+            };
+            LiteralValue::Int(n)
+        }
+        Rule::bool_literal => {
+            let b = inner.as_str() == "true";
+            LiteralValue::Bool(b)
+        }
+        Rule::char_literal => {
+            let s = inner.as_str();
+            // Remove quotes: 'x' -> x
+            let c = if s.len() >= 3 && s.starts_with('\'') && s.ends_with('\'') {
+                let inner_str = &s[1..s.len() - 1];
+                if inner_str.starts_with('\\') {
+                    // Handle escape sequences
+                    match inner_str.chars().nth(1) {
+                        Some('n') => '\n',
+                        Some('r') => '\r',
+                        Some('t') => '\t',
+                        Some('0') => '\0',
+                        Some('\\') => '\\',
+                        Some('\'') => '\'',
+                        _ => inner_str.chars().next().unwrap_or('?'),
+                    }
+                } else {
+                    inner_str.chars().next().unwrap_or('?')
+                }
+            } else {
+                '?'
+            };
+            LiteralValue::Char(c)
+        }
+        _ => {
+            return Err(BmbError::ParseError {
+                line: span.line,
+                column: span.column,
+                message: format!("Unexpected literal type: {:?}", inner.as_rule()),
+            });
+        }
+    };
+
+    Ok(Pattern::Literal { value, span })
 }
 
 fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
@@ -977,6 +1214,9 @@ fn parse_opcode(pair: pest::iterators::Pair<Rule>) -> Result<Opcode> {
         "load" => Ok(Opcode::Load),
         "store" => Ok(Opcode::Store),
         "print" => Ok(Opcode::Print),
+        "box" => Ok(Opcode::Box),
+        "unbox" => Ok(Opcode::Unbox),
+        "drop" => Ok(Opcode::Drop),
         other => Err(BmbError::ParseError {
             line: 0,
             column: 0,
@@ -2590,5 +2830,134 @@ _base:
         assert_eq!(program.nodes.len(), 1);
         assert_eq!(program.nodes[0].params[0].annotation, ParamAnnotation::Device);
         assert_eq!(program.nodes[0].params[1].annotation, ParamAnnotation::None);
+    }
+
+    #[test]
+    fn test_parse_match_with_literal_patterns() {
+        let src = r#"
+@node classify
+@params n:i32
+@returns i32
+
+  @match %n
+  @case 0:
+    ret 0
+  @case 1:
+    ret 1
+  @default:
+    ret 2
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse match: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        assert_eq!(program.nodes[0].body.len(), 1);
+
+        if let Instruction::Match(m) = &program.nodes[0].body[0] {
+            assert_eq!(m.scrutinee, "n");
+            assert_eq!(m.arms.len(), 2);
+            assert!(m.default.is_some());
+
+            // Check first arm pattern
+            if let Pattern::Literal { value, .. } = &m.arms[0].pattern {
+                assert!(matches!(value, LiteralValue::Int(0)));
+            } else {
+                panic!("Expected literal pattern");
+            }
+        } else {
+            panic!("Expected match instruction");
+        }
+    }
+
+    #[test]
+    fn test_parse_match_with_variant_patterns() {
+        let src = r#"
+@enum Status
+  Ok i32
+  Err i32
+
+@node handle_status
+@params s:Status
+@returns i32
+
+  @match %s
+  @case Status::Ok(%val):
+    ret %val
+  @case Status::Err(%code):
+    ret %code
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse match with variants: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+
+        if let Instruction::Match(m) = &program.nodes[0].body[0] {
+            assert_eq!(m.scrutinee, "s");
+            assert_eq!(m.arms.len(), 2);
+            assert!(m.default.is_none());
+
+            // Check first arm pattern
+            if let Pattern::Variant { enum_name, variant_name, binding, .. } = &m.arms[0].pattern {
+                assert_eq!(enum_name.name, "Status");
+                assert_eq!(variant_name.name, "Ok");
+                assert_eq!(binding.as_deref(), Some("val"));
+            } else {
+                panic!("Expected variant pattern");
+            }
+        } else {
+            panic!("Expected match instruction");
+        }
+    }
+
+    #[test]
+    fn test_parse_match_bool_patterns() {
+        let src = r#"
+@node bool_to_int
+@params b:bool
+@returns i32
+
+  @match %b
+  @case true:
+    ret 1
+  @case false:
+    ret 0
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse match with bool: {:?}", result.err());
+
+        let program = result.unwrap();
+        if let Instruction::Match(m) = &program.nodes[0].body[0] {
+            assert_eq!(m.arms.len(), 2);
+
+            if let Pattern::Literal { value, .. } = &m.arms[0].pattern {
+                assert!(matches!(value, LiteralValue::Bool(true)));
+            } else {
+                panic!("Expected literal pattern");
+            }
+        } else {
+            panic!("Expected match instruction");
+        }
+    }
+
+    #[test]
+    fn test_parse_box_type() {
+        let src = r#"
+@node alloc_box
+@params n:i32
+@returns Box<i32>
+  ret %result
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse Box type: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        if let Type::BmbBox(inner) = &program.nodes[0].returns {
+            assert_eq!(**inner, Type::I32);
+        } else {
+            panic!("Expected Box type, got {:?}", program.nodes[0].returns);
+        }
     }
 }

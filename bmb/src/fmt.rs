@@ -80,6 +80,22 @@ fn format_instruction(instr: &Instruction) -> String {
             line.push('\n');
             line
         }
+        Instruction::Match(m) => {
+            let mut output = format!("  @match {}\n", m.scrutinee);
+            for arm in &m.arms {
+                output.push_str(&format!("    @case {:?}:\n", arm.pattern));
+                for instr in &arm.body {
+                    output.push_str(&format!("    {}", format_instruction(instr)));
+                }
+            }
+            if let Some(default) = &m.default {
+                output.push_str("    @default:\n");
+                for instr in &default.body {
+                    output.push_str(&format!("    {}", format_instruction(instr)));
+                }
+            }
+            output
+        }
     }
 }
 

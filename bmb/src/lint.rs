@@ -219,6 +219,22 @@ fn check_unreachable_code(node: &Node, warnings: &mut Vec<LintWarning>) {
                 }
                 prev_was_terminator = stmt.opcode == Opcode::Ret || stmt.opcode == Opcode::Jmp;
             }
+            Instruction::Match(m) => {
+                // Match expressions reset terminator state (each arm may or may not terminate)
+                if prev_was_terminator {
+                    warnings.push(LintWarning {
+                        severity: Severity::Warning,
+                        code: "W004",
+                        message: "unreachable code".to_string(),
+                        line: Some(m.span.line),
+                        suggestion: Some(
+                            "this code will never be executed; consider removing it".to_string(),
+                        ),
+                    });
+                    break;
+                }
+                prev_was_terminator = false; // Match doesn't necessarily terminate
+            }
         }
     }
 }
@@ -237,6 +253,31 @@ fn check_unused_labels(node: &Node, warnings: &mut Vec<LintWarning>) {
                 for operand in &stmt.operands {
                     if let Operand::Label(label) = operand {
                         used_labels.insert(label.name.clone());
+                    }
+                }
+            }
+            Instruction::Match(m) => {
+                // Recursively check match arm bodies for label usage
+                for arm in &m.arms {
+                    for instr in &arm.body {
+                        if let Instruction::Statement(stmt) = instr {
+                            for operand in &stmt.operands {
+                                if let Operand::Label(label) = operand {
+                                    used_labels.insert(label.name.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(default) = &m.default {
+                    for instr in &default.body {
+                        if let Instruction::Statement(stmt) = instr {
+                            for operand in &stmt.operands {
+                                if let Operand::Label(label) = operand {
+                                    used_labels.insert(label.name.clone());
+                                }
+                            }
+                        }
                     }
                 }
             }

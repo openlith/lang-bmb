@@ -252,6 +252,7 @@ fn optimize_instruction(instr: Instruction, level: OptLevel) -> Option<Instructi
             Some(Instruction::Statement(stmt))
         }
         Instruction::Label(_) => Some(instr),
+        Instruction::Match(m) => Some(Instruction::Match(m.clone())),
     }
 }
 

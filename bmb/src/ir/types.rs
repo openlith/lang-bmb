@@ -117,6 +117,8 @@ impl From<&Type> for IrType {
             Type::Option(_) | Type::Result { .. } | Type::Vector(_) | Type::Slice(_) => IrType::I32,
             // String types (v0.9+) - represented as pointers
             Type::BmbString | Type::BmbStr => IrType::I32,
+            // Box type (v0.13+) - heap-allocated pointer
+            Type::BmbBox(_) => IrType::I32,
         }
     }
 }

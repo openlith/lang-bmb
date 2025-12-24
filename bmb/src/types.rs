@@ -521,6 +521,8 @@ fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
             validate_type(err, registry)
         }
         Type::Vector(inner) | Type::Slice(inner) => validate_type(inner, registry),
+        // Box<T> for heap-allocated recursive types
+        Type::BmbBox(inner) => validate_type(inner, registry),
     }
 }
 
@@ -595,6 +597,41 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) ->
             Instruction::Statement(stmt) => {
                 typecheck_statement(stmt, &mut env, &node.returns, registry)?;
             }
+            Instruction::Match(match_stmt) => {
+                // Get scrutinee type
+                let scrutinee_type = env.get_type(&match_stmt.scrutinee)
+                    .ok_or_else(|| BmbError::TypeError {
+                        message: format!("Unknown register in @match: %{}", match_stmt.scrutinee),
+                    })?
+                    .clone();
+
+                // Type check each arm
+                for arm in &match_stmt.arms {
+                    // Validate pattern against scrutinee type
+                    typecheck_pattern(&arm.pattern, &scrutinee_type, &mut env, registry)?;
+
+                    // Type check arm body
+                    for instr in &arm.body {
+                        if let Instruction::Statement(stmt) = instr {
+                            typecheck_statement(stmt, &mut env, &node.returns, registry)?;
+                        }
+                    }
+
+                    // Remove bindings after arm (scope ends)
+                    if let Pattern::Variant { binding: Some(ref b), .. } = arm.pattern {
+                        env.registers.remove(b);
+                    }
+                }
+
+                // Type check default arm if present
+                if let Some(default) = &match_stmt.default {
+                    for instr in &default.body {
+                        if let Instruction::Statement(stmt) = instr {
+                            typecheck_statement(stmt, &mut env, &node.returns, registry)?;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -660,6 +697,131 @@ fn track_statement_usage(stmt: &Statement, env: &mut TypeEnv) {
     for operand in &stmt.operands {
         track_operand_usage(operand, env);
     }
+}
+
+/// Type check a pattern in a match arm
+fn typecheck_pattern(
+    pattern: &Pattern,
+    scrutinee_type: &Type,
+    env: &mut TypeEnv,
+    registry: &TypeRegistry,
+) -> Result<()> {
+    match pattern {
+        Pattern::Variant {
+            enum_name,
+            variant_name,
+            binding,
+            ..
+        } => {
+            // Verify scrutinee is an enum type
+            let enum_type_name = match scrutinee_type {
+                Type::Enum(name) | Type::Struct(name) => name,
+                _ => {
+                    return Err(BmbError::TypeError {
+                        message: format!(
+                            "Cannot match variant pattern against non-enum type {}",
+                            scrutinee_type
+                        ),
+                    });
+                }
+            };
+
+            // Verify enum name matches
+            if enum_type_name != &enum_name.name {
+                return Err(BmbError::TypeError {
+                    message: format!(
+                        "Pattern enum {} doesn't match scrutinee type {}",
+                        enum_name.name, enum_type_name
+                    ),
+                });
+            }
+
+            // Look up the enum definition
+            if let Some(enum_def) = registry.get_enum(&enum_name.name) {
+                // Find the variant
+                let variant = enum_def.variants.iter().find(|v| v.name.name == variant_name.name);
+                if let Some(v) = variant {
+                    // If there's a binding, add it to the environment with the variant's payload type
+                    if let Some(bind_name) = binding {
+                        if let Some(ref payload_type) = v.payload {
+                            env.add_register(bind_name, payload_type.clone());
+                        } else {
+                            return Err(BmbError::TypeError {
+                                message: format!(
+                                    "Variant {}::{} has no payload but binding was provided",
+                                    enum_name.name, variant_name.name
+                                ),
+                            });
+                        }
+                    }
+                } else {
+                    return Err(BmbError::TypeError {
+                        message: format!(
+                            "Unknown variant {}::{}",
+                            enum_name.name, variant_name.name
+                        ),
+                    });
+                }
+            } else {
+                return Err(BmbError::TypeError {
+                    message: format!("Unknown enum type: {}", enum_name.name),
+                });
+            }
+        }
+        Pattern::Literal { value, .. } => {
+            // Verify literal type matches scrutinee type
+            let literal_type = match value {
+                LiteralValue::Int(_) => {
+                    // Integer literals can match i32, i64, u32, etc.
+                    // For now, accept if scrutinee is any integer type
+                    if !matches!(
+                        scrutinee_type,
+                        Type::I8
+                            | Type::I16
+                            | Type::I32
+                            | Type::I64
+                            | Type::U8
+                            | Type::U16
+                            | Type::U32
+                            | Type::U64
+                    ) {
+                        return Err(BmbError::TypeError {
+                            message: format!(
+                                "Integer pattern cannot match type {}",
+                                scrutinee_type
+                            ),
+                        });
+                    }
+                    scrutinee_type.clone()
+                }
+                LiteralValue::Bool(_) => {
+                    if *scrutinee_type != Type::Bool {
+                        return Err(BmbError::TypeError {
+                            message: format!(
+                                "Bool pattern cannot match type {}",
+                                scrutinee_type
+                            ),
+                        });
+                    }
+                    Type::Bool
+                }
+                LiteralValue::Char(_) => {
+                    if *scrutinee_type != Type::Char {
+                        return Err(BmbError::TypeError {
+                            message: format!(
+                                "Char pattern cannot match type {}",
+                                scrutinee_type
+                            ),
+                        });
+                    }
+                    Type::Char
+                }
+            };
+            // Pattern type matches - no action needed
+            let _ = literal_type;
+        }
+    }
+    Ok(())
 }
 
 fn typecheck_statement(
@@ -933,6 +1095,67 @@ fn typecheck_statement(
             if !matches!(stmt.operands[0], Operand::StringLiteral(_)) {
                 return Err(BmbError::TypeError {
                     message: "print requires a string literal operand".to_string(),
+                });
+            }
+        }
+
+        Opcode::Box => {
+            // box %dest %src - Allocate heap memory for value, store pointer
+            if stmt.operands.len() != 2 {
+                return Err(BmbError::TypeError {
+                    message: format!("box requires 2 operands (dest, src), got {}", stmt.operands.len()),
+                });
+            }
+
+            // Get source type
+            let src_type = get_operand_type(&stmt.operands[1], env, registry)?;
+
+            // Destination register gets Box<T> type
+            if let Operand::Register(ref r) = stmt.operands[0] {
+                env.add_register(&r.name, Type::BmbBox(Box::new(src_type)));
+            }
+        }
+
+        Opcode::Unbox => {
+            // unbox %dest %src - Dereference Box pointer, read value
+            if stmt.operands.len() != 2 {
+                return Err(BmbError::TypeError {
+                    message: format!("unbox requires 2 operands (dest, src), got {}", stmt.operands.len()),
+                });
+            }
+
+            // Get source type (must be Box<T>)
+            let src_type = get_operand_type(&stmt.operands[1], env, registry)?;
+
+            match &src_type {
+                Type::BmbBox(inner) => {
+                    // Destination register gets the inner type
+                    if let Operand::Register(ref r) = stmt.operands[0] {
+                        env.add_register(&r.name, (**inner).clone());
+                    }
+                }
+                _ => {
+                    return Err(BmbError::TypeError {
+                        message: format!("unbox requires Box<T> source, got {}", src_type),
+                    });
+                }
+            }
+        }
+
+        Opcode::Drop => {
+            // drop %src - Mark Box as freed (type checking only)
+            if stmt.operands.len() != 1 {
+                return Err(BmbError::TypeError {
+                    message: format!("drop requires 1 operand, got {}", stmt.operands.len()),
+                });
+            }
+
+            // Get source type (must be Box<T>)
+            let src_type = get_operand_type(&stmt.operands[0], env, registry)?;
+
+            if !matches!(src_type, Type::BmbBox(_)) {
+                return Err(BmbError::TypeError {
+                    message: format!("drop requires Box<T> operand, got {}", src_type),
                 });
             }
         }
@@ -1926,5 +2149,72 @@ _less:
         let registry = TypeRegistry::new();
         let result = typecheck_node(&node, &env, &registry);
         assert!(result.is_ok(), "Regular param can be used multiple times: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_typecheck_match_literal_patterns() {
+        let source = r#"
+@node classify
+@params n:i32
+@returns i32
+
+  mov %x n
+  @match %x
+  @case 0:
+    mov %result 0
+    ret %result
+  @case 1:
+    mov %result 1
+    ret %result
+  @default:
+    mov %result 2
+    ret %result
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Match type check failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_typecheck_match_wrong_pattern_type() {
+        let source = r#"
+@node classify
+@params n:i32
+@returns i32
+
+  mov %x n
+  @match %x
+  @case true:
+    mov %result 0
+    ret %result
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_err(), "Should fail: bool pattern on i32 scrutinee");
+        let err_msg = format!("{:?}", result.err());
+        assert!(err_msg.contains("Bool pattern cannot match"), "Error message: {}", err_msg);
+    }
+
+    #[test]
+    fn test_typecheck_match_enum_variants() {
+        let source = r#"
+@enum Status
+  Ok:i32
+  Err:i32
+
+@node handle
+@params r:Status
+@returns i32
+
+  mov %x r
+  @match %x
+  @case Status::Ok(%val):
+    ret %val
+  @case Status::Err(%code):
+    ret %code
+"#;
+        let program = parser::parse(source).unwrap();
+        let result = typecheck(&program);
+        assert!(result.is_ok(), "Enum match type check failed: {:?}", result.err());
     }
 }

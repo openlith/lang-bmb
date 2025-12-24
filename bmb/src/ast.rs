@@ -392,6 +392,9 @@ pub enum Type {
     Vector(Box<Type>),
     /// Slice type: Slice<T> - borrowed view into array/vector (placeholder for Phase 4)
     Slice(Box<Type>),
+    /// Box type: Box<T> - heap-allocated pointer, enables recursive types (v0.13+)
+    /// Used for self-referential structs like AST nodes
+    BmbBox(Box<Type>),
 }
 
 impl Type {
@@ -504,6 +507,7 @@ impl fmt::Display for Type {
             Type::Result { ok, err } => write!(f, "Result<{}, {}>", ok, err),
             Type::Vector(inner) => write!(f, "Vector<{}>", inner),
             Type::Slice(inner) => write!(f, "Slice<{}>", inner),
+            Type::BmbBox(inner) => write!(f, "Box<{}>", inner),
             Type::BmbString => write!(f, "String"),
             Type::BmbStr => write!(f, "Str"),
         }
@@ -517,6 +521,69 @@ pub enum Instruction {
     Label(Identifier),
     /// Statement (opcode with operands)
     Statement(Statement),
+    /// Pattern matching statement (v0.13+)
+    Match(MatchStmt),
+}
+
+/// Pattern matching statement (v0.13+)
+/// @match %scrutinee
+///   @case Option::Some(%value):
+///     statements...
+///   @default:
+///     statements...
+#[derive(Debug, Clone)]
+pub struct MatchStmt {
+    /// The register containing the value to match
+    pub scrutinee: String,
+    /// Match arms (ordered)
+    pub arms: Vec<MatchArm>,
+    /// Optional default arm (catch-all)
+    pub default: Option<MatchDefault>,
+    pub span: Span,
+}
+
+/// A single match arm: @case Pattern: body
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    /// The pattern to match against
+    pub pattern: Pattern,
+    /// The body to execute if pattern matches
+    pub body: Vec<Instruction>,
+    pub span: Span,
+}
+
+/// Default match arm: @default: body
+#[derive(Debug, Clone)]
+pub struct MatchDefault {
+    /// The body to execute if no patterns match
+    pub body: Vec<Instruction>,
+    pub span: Span,
+}
+
+/// Pattern types for matching
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    /// Enum variant pattern: EnumName::Variant or EnumName::Variant(%binding)
+    Variant {
+        enum_name: Identifier,
+        variant_name: Identifier,
+        /// Optional binding for variant payload
+        binding: Option<String>,
+        span: Span,
+    },
+    /// Literal value pattern: 42, true, 'a'
+    Literal {
+        value: LiteralValue,
+        span: Span,
+    },
+}
+
+/// Literal values for pattern matching
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiteralValue {
+    Int(i64),
+    Bool(bool),
+    Char(char),
 }
 
 /// A statement is an opcode with its operands
@@ -575,6 +642,17 @@ pub enum Opcode {
     // I/O
     /// Print a string literal to stdout
     Print,
+
+    // Heap allocation (v0.13+ for Box<T>)
+    /// Box: box %dest %src - Allocate heap memory for value, store pointer
+    /// Creates a Box<T> from a value, heap-allocates and returns pointer
+    Box,
+    /// Unbox: unbox %dest %src - Dereference Box pointer, read value
+    /// Reads the value pointed to by a Box<T>
+    Unbox,
+    /// Drop: drop %src - Mark Box as freed (no-op with bump allocator)
+    /// Future: actual deallocation when GC is implemented
+    Drop,
 }
 
 impl fmt::Display for Opcode {
@@ -606,6 +684,9 @@ impl fmt::Display for Opcode {
             Opcode::Load => write!(f, "load"),
             Opcode::Store => write!(f, "store"),
             Opcode::Print => write!(f, "print"),
+            Opcode::Box => write!(f, "box"),
+            Opcode::Unbox => write!(f, "unbox"),
+            Opcode::Drop => write!(f, "drop"),
         }
     }
 }

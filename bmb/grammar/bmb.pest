@@ -1,5 +1,14 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.12
+// Version 0.13
+//
+// Changes in 0.13:
+//   - Added @match pattern matching for enums and values
+//   - @case arms with pattern destructuring
+//   - Supports enum variant matching: @case Option::Some(%val)
+//   - Supports literal matching: @case 0, @case true
+//   - @default for catch-all (or exhaustive matching required)
+//   - Added Box<T> for recursive/heap-allocated types
+//   - Added box/unbox/drop opcodes for heap allocation
 //
 // Changes in 0.12:
 //   - Added @extern for FFI declarations with explicit calling conventions
@@ -243,11 +252,48 @@ requires = { ("@requires" | "@&") ~ ident ~ "(" ~ requires_args? ~ ")" }
 requires_args = { expr ~ ("," ~ expr)* }
 
 // Function body - explicitly mark start with indented instructions
-body = { (label | stmt)+ }
+body = { (label | match_stmt | stmt)+ }
 
 // Labels use underscore prefix (e.g., _loop:, _end:)
 // Must include the colon to distinguish from label_ref in operands
 label = @{ "_" ~ (ASCII_ALPHA | ASCII_DIGIT | "_")+ ~ ":" }
+
+// Pattern matching statement (v0.13+)
+// @match %scrutinee
+//   @case Option::Some(%value):
+//     ret %value
+//   @case Option::None:
+//     ret 0
+//   @default:
+//     ret -1
+match_stmt = {
+    "@match" ~ register ~ match_arm+ ~ match_default?
+}
+
+match_arm = {
+    "@case" ~ pattern ~ ":" ~ match_body
+}
+
+match_default = {
+    "@default" ~ ":" ~ match_body
+}
+
+// Match body - statements until next @case/@default or end of match
+match_body = { (label | stmt)+ }
+
+// Pattern types:
+// - Variant pattern: EnumName::Variant or EnumName::Variant(%binding)
+// - Literal pattern: 42, true, false, 'a'
+// - Wildcard: _ (only in @default)
+pattern = { variant_pattern | literal_pattern }
+
+variant_pattern = {
+    ident ~ "::" ~ ident ~ ("(" ~ register ~ ")")?
+}
+
+literal_pattern = {
+    int_literal | bool_literal | char_literal
+}
 
 // Statements - opcode followed by operands
 stmt = { opcode ~ operand* }
@@ -258,12 +304,14 @@ opcode = @{
      "and" | "or" | "xor" | "shl" | "shr" | "not" |
      "eq" | "ne" | "lt" | "le" | "gt" | "ge" |
      "ret" | "jmp" | "jif" | "call" | "xcall" |
-     "mov" | "load" | "store" | "print") ~ !ASCII_ALPHANUMERIC
+     "mov" | "load" | "store" | "print" |
+     "box" | "unbox" | "drop") ~ !ASCII_ALPHANUMERIC
 }
 
 // Operands
 // qualified_ident must come before ident to match module.function patterns
-operand = { register | label_ref | str_literal | char_literal | float_literal | int_literal | field_access | array_access | qualified_ident | ident }
+// ident must NOT match opcode keywords (box, unbox, drop, etc.) - use negative lookahead
+operand = { register | label_ref | str_literal | char_literal | float_literal | int_literal | field_access | array_access | qualified_ident | (!opcode ~ ident) }
 
 // Qualified identifier for module references: module.function
 qualified_ident = { ident ~ "::" ~ ident }
@@ -298,9 +346,9 @@ type_spec = { array_type | ref_type | ptr_type | generic_type | string_type | pr
 // Str: Borrowed UTF-8 string slice (view into String or static data)
 // UTF-8 validity is guaranteed at type level - "Omission is guessing"
 string_type = @{ ("String" | "Str") ~ !ASCII_ALPHANUMERIC }
-// Generic types: Option<T>, Result<T,E>, Vector<T>, etc.
+// Generic types: Option<T>, Result<T,E>, Vector<T>, Box<T>, etc.
 generic_type = { generic_name ~ "<" ~ type_spec ~ ("," ~ type_spec)* ~ ">" }
-generic_name = @{ ("Option" | "Result" | "Vector" | "Slice") ~ !ASCII_ALPHANUMERIC }
+generic_name = @{ ("Option" | "Result" | "Vector" | "Slice" | "Box") ~ !ASCII_ALPHANUMERIC }
 
 // Primitive types
 // Signed: i8, i16, i32, i64

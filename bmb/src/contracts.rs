@@ -234,6 +234,7 @@ fn verify_purity(
         let stmt = match instr {
             Instruction::Statement(stmt) => stmt,
             Instruction::Label(_) => continue,
+            Instruction::Match(_) => continue, // Pattern matching doesn't affect purity for now
         };
 
         match &stmt.opcode {
@@ -747,6 +748,8 @@ pub fn type_to_valtype(ty: &Type) -> ValType {
         | Type::Slice(_) => ValType::I32,
         // String types (v0.9+) - represented as i32 pointers
         | Type::BmbString | Type::BmbStr => ValType::I32,
+        // Box type (v0.13+) - heap-allocated pointer
+        | Type::BmbBox(_) => ValType::I32,
     }
 }
 

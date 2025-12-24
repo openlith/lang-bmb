@@ -8,8 +8,9 @@
 use std::collections::HashMap;
 
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, Function, FunctionSection, ImportSection,
-    Instruction, MemorySection, MemoryType, Module, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, ExportKind, ExportSection, Function, FunctionSection,
+    GlobalSection, GlobalType, ImportSection, Instruction, MemorySection, MemoryType, Module,
+    TypeSection, ValType,
 };
 
 use crate::ast::{self, Invariant, Node, Opcode, Operand, Statement, Type};
@@ -117,6 +118,8 @@ fn type_size_align(ty: &Type) -> (u32, u32) {
         // String types (v0.9+) - UTF-8 strings are fat pointers
         Type::BmbString => (12, 4), // ptr(4) + len(4) + cap(4) on WASM32
         Type::BmbStr => (8, 4),     // ptr(4) + len(4) - borrowed slice  // Pointer + length (fat pointer)
+        // Box type (v0.13+) - heap-allocated pointer
+        Type::BmbBox(_) => (4, 4),  // Just a pointer on WASM32
     }
 }
 
@@ -141,14 +144,21 @@ struct CodeGenerator {
     imports: ImportSection,
     functions: FunctionSection,
     memory: MemorySection,
+    globals: GlobalSection,
     exports: ExportSection,
     code: CodeSection,
     function_indices: HashMap<String, u32>,
     struct_layouts: HashMap<String, StructLayout>,
+    /// Enum definitions for pattern matching codegen
+    enums: HashMap<String, crate::ast::EnumDef>,
     next_func_idx: u32,
     next_type_idx: u32,
     /// Flag to track if memory is needed
     needs_memory: bool,
+    /// Flag to track if heap allocation is needed (for Box<T>)
+    needs_heap: bool,
+    /// Global index for heap pointer (bump allocator)
+    heap_ptr_global_idx: u32,
 }
 
 impl CodeGenerator {
@@ -159,13 +169,17 @@ impl CodeGenerator {
             imports: ImportSection::new(),
             functions: FunctionSection::new(),
             memory: MemorySection::new(),
+            globals: GlobalSection::new(),
             exports: ExportSection::new(),
             code: CodeSection::new(),
             function_indices: HashMap::new(),
             struct_layouts: HashMap::new(),
+            enums: HashMap::new(),
             next_func_idx: 0,
             next_type_idx: 0,
             needs_memory: false,
+            needs_heap: false,
+            heap_ptr_global_idx: 0,
         }
     }
 
@@ -192,6 +206,11 @@ impl CodeGenerator {
     fn generate_program(&mut self, program: &crate::types::TypedProgram) -> Result<()> {
         // Phase 0: Calculate struct layouts from registry
         self.calculate_struct_layouts(&program.registry);
+
+        // Store enum definitions for pattern matching codegen
+        for (name, enum_def) in &program.registry.enums {
+            self.enums.insert(name.clone(), enum_def.clone());
+        }
 
         // First pass: register imported functions
         // Imported functions take function indices before local functions
@@ -247,12 +266,58 @@ impl CodeGenerator {
             self.next_func_idx += 1;
         }
 
+        // Detection pass: check if heap allocation is needed (Box<T> usage)
+        for typed_node in &program.nodes {
+            if self.uses_heap_allocation(&typed_node.node) {
+                self.needs_heap = true;
+                break;
+            }
+        }
+
         // Third pass: generate function bodies
         for typed_node in &program.nodes {
             self.generate_function(typed_node, &program.contracts)?;
         }
 
         Ok(())
+    }
+
+    /// Check if a node uses heap allocation (box/unbox/drop opcodes)
+    fn uses_heap_allocation(&self, node: &Node) -> bool {
+        for instr in &node.body {
+            match instr {
+                ast::Instruction::Statement(stmt) => {
+                    if matches!(stmt.opcode, Opcode::Box | Opcode::Unbox | Opcode::Drop) {
+                        return true;
+                    }
+                }
+                ast::Instruction::Match(match_stmt) => {
+                    // Check match arms for heap ops
+                    for arm in &match_stmt.arms {
+                        for instr in &arm.body {
+                            if let ast::Instruction::Statement(stmt) = instr {
+                                if matches!(stmt.opcode, Opcode::Box | Opcode::Unbox | Opcode::Drop)
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(default) = &match_stmt.default {
+                        for instr in &default.body {
+                            if let ast::Instruction::Statement(stmt) = instr {
+                                if matches!(stmt.opcode, Opcode::Box | Opcode::Unbox | Opcode::Drop)
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     fn register_import_type(&mut self, import: &crate::ast::Import) -> Result<u32> {
@@ -493,6 +558,9 @@ impl CodeGenerator {
                         }
                     }
                 }
+                ast::Instruction::Match(match_stmt) => {
+                    self.generate_match(match_stmt, func, ctx)?;
+                }
             }
         }
 
@@ -675,6 +743,208 @@ impl CodeGenerator {
                 return Err(BmbError::CodegenError {
                     message: "print opcode is not supported in WASM. Use --emit elf for native x64 compilation.".to_string(),
                 });
+            }
+
+            Opcode::Box => {
+                // box %dest %src - Allocate heap memory for value, store pointer
+                // Bump allocator implementation:
+                // 1. Get current heap pointer
+                // 2. Store value at heap pointer
+                // 3. Store heap pointer in %dest (this is the Box pointer)
+                // 4. Increment heap pointer by value size
+
+                // Get source value type to determine size
+                let src_type = if let Operand::Register(r) = &stmt.operands[1] {
+                    ctx.register_types
+                        .get(&r.name)
+                        .cloned()
+                        .unwrap_or(Type::I32)
+                } else {
+                    Type::I32 // Default for literals
+                };
+                let (size, _align) = type_size_align(&src_type);
+
+                // Get destination register index
+                let dest_idx = if let Operand::Register(r) = &stmt.operands[0] {
+                    *ctx.locals.get(&r.name).unwrap_or(&0)
+                } else {
+                    0
+                };
+
+                // Step 1: Get current heap pointer and save it for the Box pointer
+                func.instruction(&Instruction::GlobalGet(self.heap_ptr_global_idx));
+
+                // Step 2: Store value at heap pointer address
+                // First, duplicate the heap pointer for the store operation
+                func.instruction(&Instruction::GlobalGet(self.heap_ptr_global_idx));
+                // Load source value onto stack
+                self.generate_operand(&stmt.operands[1], func, ctx)?;
+                // Store value at [heap_ptr]
+                match src_type {
+                    Type::I8 | Type::U8 | Type::Bool => {
+                        func.instruction(&Instruction::I32Store8(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 0,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I16 | Type::U16 => {
+                        func.instruction(&Instruction::I32Store16(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 1,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I32 | Type::U32 | Type::Char | Type::Enum(_) | Type::BmbBox(_) => {
+                        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I64 | Type::U64 => {
+                        func.instruction(&Instruction::I64Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::F32 => {
+                        func.instruction(&Instruction::F32Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::F64 => {
+                        func.instruction(&Instruction::F64Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
+                    }
+                    _ => {
+                        func.instruction(&Instruction::I32Store(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                }
+
+                // Step 3: The heap pointer on stack becomes the Box pointer
+                // (Already on stack from Step 1)
+                func.instruction(&Instruction::LocalSet(dest_idx));
+
+                // Step 4: Increment heap pointer by size
+                func.instruction(&Instruction::GlobalGet(self.heap_ptr_global_idx));
+                func.instruction(&Instruction::I32Const(size as i32));
+                func.instruction(&Instruction::I32Add);
+                func.instruction(&Instruction::GlobalSet(self.heap_ptr_global_idx));
+            }
+
+            Opcode::Unbox => {
+                // unbox %dest %src - Dereference Box pointer, read value
+                // 1. Get Box pointer from %src
+                // 2. Load value from that address
+                // 3. Store in %dest
+
+                // Get inner type from Box<T>
+                let inner_type = if let Operand::Register(r) = &stmt.operands[1] {
+                    if let Some(Type::BmbBox(inner)) = ctx.register_types.get(&r.name) {
+                        (**inner).clone()
+                    } else {
+                        Type::I32 // Fallback
+                    }
+                } else {
+                    Type::I32
+                };
+
+                // Get destination register index
+                let dest_idx = if let Operand::Register(r) = &stmt.operands[0] {
+                    *ctx.locals.get(&r.name).unwrap_or(&0)
+                } else {
+                    0
+                };
+
+                // Load the Box pointer
+                self.generate_operand(&stmt.operands[1], func, ctx)?;
+
+                // Load value from [box_ptr]
+                match inner_type {
+                    Type::I8 => {
+                        func.instruction(&Instruction::I32Load8S(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 0,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::U8 | Type::Bool => {
+                        func.instruction(&Instruction::I32Load8U(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 0,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I16 => {
+                        func.instruction(&Instruction::I32Load16S(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 1,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::U16 => {
+                        func.instruction(&Instruction::I32Load16U(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 1,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I32 | Type::U32 | Type::Char | Type::Enum(_) | Type::BmbBox(_) => {
+                        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::I64 | Type::U64 => {
+                        func.instruction(&Instruction::I64Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::F32 => {
+                        func.instruction(&Instruction::F32Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::F64 => {
+                        func.instruction(&Instruction::F64Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
+                    }
+                    _ => {
+                        func.instruction(&Instruction::I32Load(wasm_encoder::MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                }
+
+                // Store result in destination
+                func.instruction(&Instruction::LocalSet(dest_idx));
+            }
+
+            Opcode::Drop => {
+                // drop %src - Mark Box as freed
+                // With bump allocator, this is a no-op (memory is not actually freed)
+                // Future: integrate with GC or region-based memory management
             }
         }
 
@@ -1021,6 +1291,260 @@ impl CodeGenerator {
         Ok(())
     }
 
+    /// Generate WASM code for pattern matching (@match)
+    /// Uses a block with if-else chain for arm selection
+    fn generate_match(
+        &self,
+        match_stmt: &crate::ast::MatchStmt,
+        func: &mut Function,
+        ctx: &FunctionContext,
+    ) -> Result<()> {
+        // Get scrutinee local index
+        let scrutinee_idx = ctx
+            .locals
+            .get(&match_stmt.scrutinee)
+            .ok_or_else(|| BmbError::CodegenError {
+                message: format!("Unknown register in match: %{}", match_stmt.scrutinee),
+            })?;
+
+        // Create outer block for match (to break out after arm execution)
+        func.instruction(&Instruction::Block(BlockType::Empty));
+
+        // Generate each arm
+        for arm in &match_stmt.arms {
+            // Load scrutinee
+            func.instruction(&Instruction::LocalGet(*scrutinee_idx));
+
+            // Generate pattern comparison
+            self.generate_pattern_comparison(&arm.pattern, func, ctx)?;
+
+            // If pattern matches, execute body and break
+            func.instruction(&Instruction::If(BlockType::Empty));
+
+            // Generate arm body (simplified - just statements, no nested match)
+            for instruction in &arm.body {
+                match instruction {
+                    crate::ast::Instruction::Statement(stmt) => {
+                        // Generate statement without control flow analysis
+                        // This is simplified - complex control flow in match arms
+                        // would need full analysis
+                        self.generate_statement_simple(stmt, func, ctx)?;
+                    }
+                    crate::ast::Instruction::Label(_) => {
+                        // Labels in match arms - future support
+                    }
+                    crate::ast::Instruction::Match(nested) => {
+                        // Nested match - recursive call
+                        self.generate_match(nested, func, ctx)?;
+                    }
+                }
+            }
+
+            // Break out of match block
+            func.instruction(&Instruction::Br(1)); // depth 1 = outer block
+            func.instruction(&Instruction::End); // end if
+        }
+
+        // Generate default arm if present
+        if let Some(default) = &match_stmt.default {
+            for instruction in &default.body {
+                match instruction {
+                    crate::ast::Instruction::Statement(stmt) => {
+                        self.generate_statement_simple(stmt, func, ctx)?;
+                    }
+                    crate::ast::Instruction::Label(_) => {}
+                    crate::ast::Instruction::Match(nested) => {
+                        self.generate_match(nested, func, ctx)?;
+                    }
+                }
+            }
+        }
+
+        // End outer block
+        func.instruction(&Instruction::End);
+
+        // Add unreachable after match if all arms return (WASM needs this for type checking)
+        // This instruction is polymorphic and satisfies any stack type requirement
+        func.instruction(&Instruction::Unreachable);
+
+        Ok(())
+    }
+
+    /// Generate pattern comparison code
+    /// Leaves 1 on stack if pattern matches, 0 otherwise
+    fn generate_pattern_comparison(
+        &self,
+        pattern: &crate::ast::Pattern,
+        func: &mut Function,
+        _ctx: &FunctionContext,
+    ) -> Result<()> {
+        match pattern {
+            crate::ast::Pattern::Literal { value, .. } => {
+                // Compare scrutinee (already on stack) with literal
+                match value {
+                    crate::ast::LiteralValue::Int(n) => {
+                        func.instruction(&Instruction::I32Const(*n as i32));
+                        func.instruction(&Instruction::I32Eq);
+                    }
+                    crate::ast::LiteralValue::Bool(b) => {
+                        func.instruction(&Instruction::I32Const(if *b { 1 } else { 0 }));
+                        func.instruction(&Instruction::I32Eq);
+                    }
+                    crate::ast::LiteralValue::Char(c) => {
+                        func.instruction(&Instruction::I32Const(*c as i32));
+                        func.instruction(&Instruction::I32Eq);
+                    }
+                }
+            }
+            crate::ast::Pattern::Variant {
+                enum_name,
+                variant_name,
+                ..
+            } => {
+                // For enums, compare discriminant (first word) with variant index
+                // Enum representation: discriminant is stored as i32
+                // Get variant index from enum definition
+                let variant_idx = self
+                    .enums
+                    .get(&enum_name.name)
+                    .and_then(|e| {
+                        e.variants
+                            .iter()
+                            .position(|v| v.name.name == variant_name.name)
+                    })
+                    .ok_or_else(|| BmbError::CodegenError {
+                        message: format!(
+                            "Unknown enum variant: {}::{}",
+                            enum_name.name, variant_name.name
+                        ),
+                    })?;
+
+                // For simple enums (no payload), scrutinee IS the discriminant
+                // Compare with variant index
+                func.instruction(&Instruction::I32Const(variant_idx as i32));
+                func.instruction(&Instruction::I32Eq);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Simplified statement generation for match arm bodies
+    /// Doesn't handle complex control flow (jmp/jif with labels)
+    fn generate_statement_simple(
+        &self,
+        stmt: &Statement,
+        func: &mut Function,
+        ctx: &FunctionContext,
+    ) -> Result<()> {
+        match stmt.opcode {
+            Opcode::Add => self.generate_binary_op(stmt, func, ctx, BinaryOp::Add)?,
+            Opcode::Sub => self.generate_binary_op(stmt, func, ctx, BinaryOp::Sub)?,
+            Opcode::Mul => self.generate_binary_op(stmt, func, ctx, BinaryOp::Mul)?,
+            Opcode::Div => self.generate_binary_op(stmt, func, ctx, BinaryOp::Div)?,
+            Opcode::Mod => self.generate_binary_op(stmt, func, ctx, BinaryOp::Mod)?,
+            Opcode::And => self.generate_binary_op(stmt, func, ctx, BinaryOp::And)?,
+            Opcode::Or => self.generate_binary_op(stmt, func, ctx, BinaryOp::Or)?,
+            Opcode::Xor => self.generate_binary_op(stmt, func, ctx, BinaryOp::Xor)?,
+            Opcode::Shl => self.generate_binary_op(stmt, func, ctx, BinaryOp::Shl)?,
+            Opcode::Shr => self.generate_binary_op(stmt, func, ctx, BinaryOp::Shr)?,
+            Opcode::Not => self.generate_unary_not(stmt, func, ctx)?,
+            Opcode::Eq => self.generate_binary_op(stmt, func, ctx, BinaryOp::Eq)?,
+            Opcode::Ne => self.generate_binary_op(stmt, func, ctx, BinaryOp::Ne)?,
+            Opcode::Lt => self.generate_binary_op(stmt, func, ctx, BinaryOp::Lt)?,
+            Opcode::Le => self.generate_binary_op(stmt, func, ctx, BinaryOp::Le)?,
+            Opcode::Gt => self.generate_binary_op(stmt, func, ctx, BinaryOp::Gt)?,
+            Opcode::Ge => self.generate_binary_op(stmt, func, ctx, BinaryOp::Ge)?,
+            Opcode::Ret => {
+                self.generate_operand(&stmt.operands[0], func, ctx)?;
+                func.instruction(&Instruction::Return);
+            }
+            Opcode::Mov => {
+                self.generate_operand(&stmt.operands[1], func, ctx)?;
+                if let Operand::Register(r) = &stmt.operands[0] {
+                    if let Some(&idx) = ctx.locals.get(&r.name) {
+                        func.instruction(&Instruction::LocalSet(idx));
+                    }
+                }
+            }
+            Opcode::Call => {
+                let func_name = match &stmt.operands[1] {
+                    Operand::Identifier(id) => id.name.clone(),
+                    Operand::QualifiedIdent { module, name } => {
+                        format!("{}::{}", module.name, name.name)
+                    }
+                    _ => {
+                        return Err(BmbError::CodegenError {
+                            message: "Call requires function name".to_string(),
+                        })
+                    }
+                };
+
+                for operand in stmt.operands.iter().skip(2) {
+                    self.generate_operand(operand, func, ctx)?;
+                }
+
+                if let Some(&func_idx) = ctx.function_indices.get(&func_name) {
+                    func.instruction(&Instruction::Call(func_idx));
+                } else {
+                    return Err(BmbError::CodegenError {
+                        message: format!("Unknown function: {}", func_name),
+                    });
+                }
+
+                if let Operand::Register(r) = &stmt.operands[0] {
+                    if let Some(&idx) = ctx.locals.get(&r.name) {
+                        func.instruction(&Instruction::LocalSet(idx));
+                    }
+                }
+            }
+            Opcode::Xcall => {
+                let func_name = match &stmt.operands[0] {
+                    Operand::Identifier(id) => &id.name,
+                    _ => {
+                        return Err(BmbError::CodegenError {
+                            message: "Xcall requires function name".to_string(),
+                        })
+                    }
+                };
+
+                for operand in stmt.operands.iter().skip(1) {
+                    self.generate_operand(operand, func, ctx)?;
+                }
+
+                if let Some(&func_idx) = ctx.function_indices.get(func_name) {
+                    func.instruction(&Instruction::Call(func_idx));
+                } else {
+                    return Err(BmbError::CodegenError {
+                        message: format!("Unknown function: {}", func_name),
+                    });
+                }
+            }
+            Opcode::Jmp | Opcode::Jif => {
+                return Err(BmbError::CodegenError {
+                    message: "Jump instructions not supported in match arms".to_string(),
+                });
+            }
+            Opcode::Load | Opcode::Store => {
+                // Memory operations - no-op for now
+            }
+            Opcode::Print => {
+                return Err(BmbError::CodegenError {
+                    message: "print opcode is not supported in WASM".to_string(),
+                });
+            }
+            Opcode::Box | Opcode::Unbox | Opcode::Drop => {
+                // For now, Box operations in match arms are not supported
+                // This requires access to heap pointer which is complex in this context
+                return Err(BmbError::CodegenError {
+                    message: "Box/Unbox/Drop operations not supported in match arms yet".to_string(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     fn generate_operand(
         &self,
         operand: &Operand,
@@ -1092,8 +1616,8 @@ impl CodeGenerator {
         }
         self.module.section(&self.functions);
 
-        // Memory section (if needed for structs/arrays)
-        if self.needs_memory {
+        // Memory section (if needed for structs/arrays/heap)
+        if self.needs_memory || self.needs_heap {
             // One page of memory (64KB) - can grow as needed
             self.memory.memory(MemoryType {
                 minimum: 1,
@@ -1105,6 +1629,21 @@ impl CodeGenerator {
             self.module.section(&self.memory);
             // Export memory for host access
             self.exports.export("memory", ExportKind::Memory, 0);
+        }
+
+        // Global section (if heap allocation is needed)
+        if self.needs_heap {
+            // Add heap pointer global: mutable i32, initialized to 1024
+            // (leave first 1KB for struct static data)
+            self.globals.global(
+                GlobalType {
+                    val_type: ValType::I32,
+                    mutable: true,
+                    shared: false,
+                },
+                &ConstExpr::i32_const(1024), // Start heap at 1KB offset
+            );
+            self.module.section(&self.globals);
         }
 
         self.module.section(&self.exports);
@@ -1207,6 +1746,9 @@ fn analyze_control_flow(body: &[ast::Instruction]) -> ControlFlowAnalysis {
                         jump_targets.push((pos, label_id.name.clone(), is_jmp));
                     }
                 }
+            }
+            ast::Instruction::Match(_) => {
+                // Pattern matching doesn't affect control flow analysis for now
             }
         }
     }
@@ -1342,6 +1884,8 @@ fn type_to_valtype(ty: &Type) -> ValType {
         Type::Slice(_) => ValType::I32,
         // String types (v0.9+) - represented as i32 pointers in WASM
         Type::BmbString | Type::BmbStr => ValType::I32,     // Slice pointer (fat pointer, but simplified for now)
+        // Box type (v0.13+) - heap-allocated pointer
+        Type::BmbBox(_) => ValType::I32,    // Box pointer to heap
     }
 }
 

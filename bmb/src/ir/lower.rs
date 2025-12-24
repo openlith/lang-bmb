@@ -110,6 +110,10 @@ impl IrLowerer {
                 Instruction::Statement(stmt) => {
                     self.lower_statement(stmt, &mut func.body);
                 }
+                Instruction::Match(_) => {
+                    // TODO: Implement pattern matching lowering to IR
+                    // For now, skip match statements in IR lowering
+                }
             }
         }
 
@@ -330,6 +334,11 @@ impl IrLowerer {
 
             // Handle other opcodes as no-ops for now
             Opcode::Load | Opcode::Store | Opcode::Print => {}
+
+            // Heap allocation opcodes - not yet implemented in IR
+            Opcode::Box | Opcode::Unbox | Opcode::Drop => {
+                // TODO: Implement IR lowering for heap allocation
+            }
         }
     }
 
