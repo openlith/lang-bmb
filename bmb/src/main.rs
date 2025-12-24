@@ -157,6 +157,37 @@ enum Commands {
         #[arg(long)]
         suggest_invariants: bool,
     },
+
+    /// Suggest contracts to reduce boilerplate (v0.14+)
+    Suggest {
+        /// Input BMB source file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Suggest frame conditions (@modifies)
+        #[arg(long)]
+        frame: bool,
+
+        /// Suggest postconditions (@post)
+        #[arg(long, visible_alias = "post")]
+        postcondition: bool,
+
+        /// Suggest all contract types
+        #[arg(long)]
+        all: bool,
+
+        /// Minimum confidence threshold (0.0-1.0)
+        #[arg(long, default_value = "0.5")]
+        min_confidence: f64,
+
+        /// Output suggestions as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Include explanations in output
+        #[arg(long, short)]
+        verbose: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -187,6 +218,15 @@ fn main() -> ExitCode {
             json,
             suggest_invariants,
         } => cmd_verify(file, solver, emit_smt, json, suggest_invariants),
+        Commands::Suggest {
+            file,
+            frame,
+            postcondition,
+            all,
+            min_confidence,
+            json,
+            verbose,
+        } => cmd_suggest(file, frame, postcondition, all, min_confidence, json, verbose),
     }
 }
 
@@ -1420,4 +1460,188 @@ fn find_loop_labels(node: &bmb::types::TypedNode) -> Vec<String> {
     }
 
     labels
+}
+
+/// Suggest contracts to reduce boilerplate
+fn cmd_suggest(
+    file: PathBuf,
+    frame: bool,
+    postcondition: bool,
+    all: bool,
+    min_confidence: f64,
+    json: bool,
+    verbose: bool,
+) -> ExitCode {
+    // Read source file
+    let source = match fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "{}: cannot read '{}': {}",
+                "error".red().bold(),
+                file.display(),
+                e
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Parse and typecheck
+    let ast = match bmb::parser::parse(&source) {
+        Ok(ast) => ast,
+        Err(e) => {
+            print_error(&e, &source);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let typed_program = match bmb::types::typecheck(&ast) {
+        Ok(tp) => tp,
+        Err(e) => {
+            print_error(&e, &source);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Configure suggestion options
+    let mut options = if all {
+        bmb::suggest::SuggestOptions::all()
+    } else {
+        bmb::suggest::SuggestOptions {
+            frame,
+            postcondition,
+            precondition: false,
+            min_confidence,
+            verbose,
+        }
+    };
+
+    // If neither --frame nor --post specified and not --all, enable both
+    if !all && !frame && !postcondition {
+        options.frame = true;
+        options.postcondition = true;
+    }
+
+    options.min_confidence = min_confidence;
+    options.verbose = verbose;
+
+    // Run contract inference
+    let result = bmb::suggest::suggest_contracts(&typed_program, &options);
+
+    // Output results
+    if json {
+        output_suggestions_json(&result, &file);
+    } else {
+        output_suggestions_text(&result, &file, verbose);
+    }
+
+    if result.suggestions.is_empty() {
+        println!(
+            "\n{}: No suggestions generated (contracts may already be complete)",
+            "info".blue()
+        );
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Output suggestions in JSON format
+fn output_suggestions_json(result: &bmb::suggest::SuggestResult, file: &PathBuf) {
+    use serde_json::json;
+
+    let suggestions: Vec<_> = result
+        .suggestions
+        .iter()
+        .map(|s| {
+            json!({
+                "node": s.node_name,
+                "kind": s.kind.to_string(),
+                "suggestion": s.expr.to_bmb_string(),
+                "confidence": s.confidence,
+                "explanation": s.explanation
+            })
+        })
+        .collect();
+
+    let output = json!({
+        "file": file.display().to_string(),
+        "analyzed_nodes": result.analyzed_nodes,
+        "suggestions": suggestions,
+        "warnings": result.warnings
+    });
+
+    println!("{}", serde_json::to_string_pretty(&output).unwrap());
+}
+
+/// Output suggestions in human-readable text format
+fn output_suggestions_text(result: &bmb::suggest::SuggestResult, file: &PathBuf, verbose: bool) {
+    println!(
+        "\n{} Contract suggestions for {}",
+        "==>".green().bold(),
+        file.display()
+    );
+    println!(
+        "    Analyzed {} node(s)\n",
+        result.analyzed_nodes.len()
+    );
+
+    if result.suggestions.is_empty() {
+        return;
+    }
+
+    let mut current_node = String::new();
+
+    for s in &result.suggestions {
+        if s.node_name != current_node {
+            if !current_node.is_empty() {
+                println!();
+            }
+            println!("  {} @node {}", ">>".cyan(), s.node_name.bold());
+            current_node = s.node_name.clone();
+        }
+
+        let confidence_color = if s.confidence >= 0.8 {
+            "green"
+        } else if s.confidence >= 0.5 {
+            "yellow"
+        } else {
+            "red"
+        };
+
+        let conf_str = format!("{:.0}%", s.confidence * 100.0);
+        let conf_display = match confidence_color {
+            "green" => conf_str.green(),
+            "yellow" => conf_str.yellow(),
+            _ => conf_str.red(),
+        };
+
+        println!(
+            "     {} {} [{}]",
+            s.kind.to_string().blue(),
+            s.expr.to_bmb_string(),
+            conf_display
+        );
+
+        if verbose {
+            println!("       {}", s.explanation.dimmed());
+        }
+    }
+
+    // Print warnings
+    if !result.warnings.is_empty() {
+        println!("\n  {}", "Warnings:".yellow());
+        for w in &result.warnings {
+            println!("    - {}", w);
+        }
+    }
+
+    // Print usage hint
+    println!(
+        "\n{}: Copy suggestions to your source file and verify correctness.",
+        "tip".cyan()
+    );
+    println!(
+        "    {}",
+        "BMB philosophy: Inference suggests, developer confirms.".dimmed()
+    );
 }

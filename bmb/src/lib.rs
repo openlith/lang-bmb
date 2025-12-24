@@ -43,6 +43,9 @@ pub mod host;
 /// CLI argument parsing abstraction for self-hosting (v0.13+)
 pub mod cli;
 
+/// Contract inference for boilerplate reduction (v0.14+)
+pub mod suggest;
+
 use thiserror::Error;
 
 pub use error::{Diagnostic, ErrorCode};

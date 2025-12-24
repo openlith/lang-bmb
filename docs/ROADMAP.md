@@ -3,7 +3,7 @@
 > **"Omission is guessing, and guessing is error."**
 
 **Last Updated**: 2025-12-24
-**Current Version**: v0.12.0
+**Current Version**: v0.14.0
 **Target**: v1.0.0 (Performance Transcendence)
 
 ---
@@ -15,12 +15,30 @@ This roadmap follows BMB's core principle: **no shortcuts, no guessing**. Each v
 ### Version Strategy
 
 ```
-v0.6-v0.15: Foundation (Self-Hosting)
-v0.16-v0.18: Bronze Stage (Generics & Language Features)
-v0.19-v0.21: Silver Stage (LLVM Integration)
-v0.22-v0.24: Gold Stage (Optimization)
+v0.6-v0.13: Foundation (Core Language Complete)
+v0.14-v0.15: Self-Hosting Preparation (Boilerplate Reduction, Tooling)
+v0.16-v0.18: Self-Hosting (Incremental Compiler in BMB)
+v0.19-v0.21: Bronze Stage (Advanced Generics & Type System)
+v0.22-v0.24: Silver Stage (LLVM Integration)
+v0.25-v0.27: Gold Stage (Optimization)
 v1.0.0: Performance Transcendence Complete 🎯
 ```
+
+### Boilerplate Reduction Strategy (v0.14+)
+
+> **Problem**: BMB's explicit contracts can create boilerplate. This reduces signal density.
+>
+> **Solution**: Inference and templates that preserve "Omission is guessing" through **suggest-then-confirm** patterns.
+
+| Technique | Reduction | Version | Philosophy |
+|-----------|-----------|---------|------------|
+| Refined Types | 40-60% | ✅ v0.8.0 | Type name = constraint (explicit) |
+| Frame Inference | 30-50% | ✅ v0.14.0 | Auto-detect writes, suggest @modifies |
+| Postcondition Inference | 20-40% | ✅ v0.14.0 | Strongest postcondition → suggestion |
+| Contract Templates | 15-25% | ✅ v0.7.0 | @contract + @requires (explicit) |
+| Default Type Contracts | 10-20% | v0.15 | Type-level invariants auto-applied |
+
+**Key Principle**: Inference generates **suggestions**, not implicit behavior. Developer confirms explicitly.
 
 ### Generics Philosophy: Contract-Propagating Monomorphic Generics
 
@@ -35,7 +53,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ---
 
-## Current State (v0.12.0)
+## Current State (v0.13.0)
 
 ### Implemented Features
 
@@ -56,6 +74,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 | **Optimization** | IR, constant folding, DCE, function inlining |
 | **Package Manager** | Gotgan with Cargo fallback |
 | **Bitwise ISA** | and, or, xor, shl, shr, not |
+| **Self-Hosting Prep** | Box<T> heap allocation, enhanced Span, ErrorCollector, File I/O abstraction, CLI argument parser |
 
 ---
 
@@ -640,72 +659,274 @@ Explicit export control with backwards compatibility:
 
 ---
 
-## v0.13.0: Self-Hosting Preparation
+## v0.13.0: Self-Hosting Preparation ✅ COMPLETE
 
 **Goal**: All primitives needed to write a compiler
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| File I/O abstraction | Critical | High |
-| Command-line argument parsing | High | Medium |
-| Tree data structures (AST) | Critical | High |
-| Pattern matching syntax | High | High |
-| Error accumulation patterns | High | Medium |
-| Source location tracking | High | Medium |
+| Task | Priority | Complexity | Status |
+|------|----------|------------|--------|
+| Box<T> heap allocation (box/unbox/drop) | Critical | High | ✅ Done |
+| Enhanced Span (multi-line tracking) | High | Medium | ✅ Done |
+| ErrorCollector (accumulation pattern) | High | Medium | ✅ Done |
+| File I/O abstraction (stdlib/io.bmb) | Critical | High | ✅ Done |
+| CLI argument parsing (platform-independent) | High | Medium | ✅ Done |
+| Tree data structures (AST) | Critical | High | Planned (v0.15) |
+| Pattern matching syntax | High | High | Planned (v0.15) |
 
-**Required Capabilities**:
+**Implemented Capabilities**:
 ```bmb
-# Must be expressible in BMB:
-- Read file → Vec<u8>
-- Parse bytes → AST tree
-- Walk tree recursively
-- Generate output bytes
-- Write to file
+# Now expressible in BMB (v0.13+):
+- Box<T> heap allocation with bump allocator
+- Multi-line source location tracking
+- Multiple error accumulation
+- File I/O via @extern host imports
+- CLI argument parsing (short/long options, subcommands)
 ```
 
 **Success Criteria**:
-- Simple text processor writable in BMB
-- All compiler primitives available
+- ✅ Heap allocation primitives (box/unbox/drop)
+- ✅ Source location tracking with snippets
+- ✅ Error collection without early termination
+- ✅ File I/O abstraction for compiler
+- ✅ CLI parsing for bmbc reimplementation
 
 ---
 
-## v0.14.0: Compiler Components in BMB
+## v0.14.0: Contract Inference & Boilerplate Reduction
 
-**Goal**: Core compiler logic rewritten in BMB
+**Goal**: Reduce boilerplate while maintaining "Omission is guessing" through suggest-then-confirm patterns
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| Lexer/Tokenizer | Critical | Medium |
-| Parser (subset of BMB grammar) | Critical | Very High |
-| AST definitions | Critical | High |
-| Type checker (core) | Critical | Very High |
-| Basic WASM emitter | High | High |
-| Integration with Rust compiler | High | High |
+> **Philosophy**: Inference generates **suggestions** displayed to developer. Developer must explicitly add to code.
 
-**Milestones**:
-1. BMB tokenizer tokenizes BMB source
-2. BMB parser parses simple BMB programs
-3. BMB type checker validates simple programs
-4. BMB emits valid WASM for trivial functions
+| Task | Priority | Complexity | Research Basis |
+|------|----------|------------|----------------|
+| **Frame Inference** | Critical | High | SPARK Ada, Frama-C |
+| **Postcondition Inference** | High | Very High | Strongest postcondition calculus |
+| **Default Type Contracts** | High | Medium | Refined types extension |
+| **Contract Templates Library** | Medium | Low | Reusable @contract definitions |
+| **`bmbc suggest` CLI** | High | Medium | Dafny --suggest-invariants |
+
+### Frame Inference (30-50% reduction)
+
+Automatically detect which memory locations a function modifies.
+
+```bash
+# CLI usage
+bmbc suggest --frame myprogram.bmb
+
+# Output:
+# Suggested @modifies for node 'process_buffer' at line 42:
+#   @modifies buf[0..len]
+#   @modifies global_count
+# Add explicitly to your code to confirm.
+```
+
+**Implementation**:
+1. Analyze `store` instructions → identify modified locations
+2. Track pointer arithmetic → infer modified regions
+3. Generate `@modifies` suggestions
+4. Developer adds to source (explicit confirmation)
+
+### Postcondition Inference (20-40% reduction)
+
+Compute strongest postcondition from function body.
+
+```bash
+bmbc suggest --post myprogram.bmb:add_one
+
+# Output:
+# Suggested @post for 'add_one':
+#   @post ret == x + 1
+# This was computed from the function body. Add if correct.
+```
+
+**Implementation (Dijkstra's Guarded Commands)**:
+```
+sp(skip, P) = P
+sp(x := E, P) = ∃x'. P[x'/x] ∧ x = E[x'/x]
+sp(S1; S2, P) = sp(S2, sp(S1, P))
+```
+
+### Default Type Contracts
+
+Type-level invariants automatically applied at function boundaries.
+
+```bmb
+# Type with default contract
+@type bounded_u8 u8 where self <= 100
+
+# When used as parameter, @pre auto-suggested
+@node process
+@params val:bounded_u8
+# Suggested: @pre val <= 100  (from type definition)
+@returns void
+```
+
+**Philosophy Alignment**:
+- ✅ Type definition is explicit (developer wrote it)
+- ✅ Suggestion is shown, not silently applied
+- ✅ Developer confirms by adding @pre
 
 **Success Criteria**:
-- `factorial.bmb` compiled by BMB-written components
-- Output matches Rust-compiled version
+- `bmbc suggest --frame` works for simple functions
+- `bmbc suggest --post` computes basic postconditions
+- Suggestions shown in CLI with add instructions
+- 20-40% reduction in manual contract writing (measured)
 
 ---
 
-## v0.15.0: Self-Hosted Compiler
+## v0.15.0: Pattern Matching & AST Structures
 
-**Goal**: BMB compiler compiles itself - Production-ready self-hosted compiler
+**Goal**: Language features needed for compiler implementation
 
 | Task | Priority | Complexity |
 |------|----------|------------|
-| Complete parser in BMB | Critical | Very High |
-| Complete type checker in BMB | Critical | Very High |
-| Complete contract verifier in BMB | Critical | Very High |
-| Complete WASM codegen in BMB | Critical | Very High |
-| Cross-compilation verification | Critical | High |
-| Performance benchmarking | High | Medium |
+| `@match` expression syntax | Critical | High |
+| Exhaustiveness checking | Critical | High |
+| AST enum definitions | Critical | Medium |
+| Recursive data structures | High | Medium |
+| Tree traversal patterns | High | Medium |
+| String operations (concat, split) | High | Medium |
+
+### Pattern Matching
+
+```bmb
+@enum Token
+  Number: i64
+  Ident: String
+  Plus
+  Minus
+
+@node token_value
+@params tok:Token
+@returns Option[i64]
+  @match tok
+    Token::Number(n) => ret Some(n)
+    Token::Ident(_) => ret None
+    Token::Plus => ret None
+    Token::Minus => ret None
+  @end
+```
+
+### Recursive AST
+
+```bmb
+@enum Expr
+  Literal: i64
+  BinOp: { op:Op, left:Box<Expr>, right:Box<Expr> }
+  Var: String
+
+@node eval
+@params e:&Expr
+@returns i64
+@pure
+  @match *e
+    Expr::Literal(n) => ret n
+    Expr::BinOp(op, l, r) =>
+      call %lv eval l
+      call %rv eval r
+      @match op
+        Op::Add => add %res %lv %rv; ret %res
+        Op::Sub => sub %res %lv %rv; ret %res
+      @end
+    Expr::Var(_) => ret 0  # Would need environment
+  @end
+```
+
+**Success Criteria**:
+- Pattern matching with exhaustiveness
+- Recursive enum types work with Box<T>
+- Tree traversal expressible in BMB
+
+---
+
+## v0.16.0: Lexer & Tokenizer in BMB
+
+**Goal**: First compiler component written in BMB (Ghuloum Phase 1)
+
+| Task | Priority | Complexity |
+|------|----------|------------|
+| Character classification | Critical | Low |
+| Token enum definition | Critical | Medium |
+| Lexer state machine | Critical | Medium |
+| Error recovery | High | Medium |
+| Source position tracking | High | Low |
+
+**Milestone**: BMB tokenizer tokenizes BMB source
+
+```bmb
+@enum Token
+  # Keywords
+  KwNode | KwParams | KwReturns | KwPre | KwPost
+  # Literals
+  IntLit: i64 | FloatLit: f64 | StringLit: String
+  # Operators
+  Plus | Minus | Star | Slash | Percent
+  # Punctuation
+  LParen | RParen | Colon | At
+  # Identifiers
+  Ident: String | Register: String
+  # Special
+  Eof | Error: String
+
+@node tokenize
+@params source:Str
+@returns Vector<Token>
+@post valid_tokens(ret)
+  # ... lexer implementation
+```
+
+**Success Criteria**:
+- `tokenize("@node foo")` → `[KwNode, Ident("foo")]`
+- Error tokens for invalid input
+- Position tracking works
+
+---
+
+## v0.17.0: Parser in BMB
+
+**Goal**: Recursive descent parser for BMB subset (Ghuloum Phase 2)
+
+| Task | Priority | Complexity |
+|------|----------|------------|
+| AST type definitions | Critical | Medium |
+| Recursive descent functions | Critical | High |
+| Precedence parsing (Pratt) | High | Medium |
+| Error messages | High | Medium |
+| Span attachment | High | Low |
+
+**Milestone**: BMB parser parses simple BMB programs
+
+```bmb
+@struct ParseResult
+  ast: Option<Program>
+  errors: Vector<Diagnostic>
+
+@node parse
+@params tokens:&Vector<Token>
+@returns ParseResult
+@post ret.ast.is_some => ret.errors.is_empty
+  # ... parser implementation
+```
+
+**Success Criteria**:
+- Parse `@node/@params/@returns` declarations
+- Parse arithmetic expressions
+- Parse control flow (jmp, jif, ret)
+- Meaningful error messages
+
+---
+
+## v0.18.0: Type Checker & Self-Hosted Compiler
+
+**Goal**: Complete self-hosted compiler bootstrap (Ghuloum Phase 3-4)
+
+| Task | Priority | Complexity |
+|------|----------|------------|
+| Type checker in BMB | Critical | Very High |
+| Contract verifier (basic) | High | High |
+| WASM codegen in BMB | Critical | High |
+| Bootstrap verification | Critical | High |
 
 **Bootstrap Stages**:
 ```
@@ -720,10 +941,7 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 **Success Criteria**:
 - Fixed point achieved
 - Performance within 2x of Rust version
-- `bmbc` binary (self-compiled)
-- Standard library with full contracts
-- Tooling stable: LSP, formatter, linter
-- Package ecosystem: Gotgan registry operational
+- `factorial.bmb` compiled by BMB-written compiler
 
 ---
 
@@ -735,7 +953,7 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 
 ---
 
-## Bronze Stage (v0.16 - v0.18): Language Foundation & Generics
+## Bronze Stage (v0.19 - v0.21): Advanced Generics & Type System
 
 **Goal**: Complete language features enabling advanced optimization, including **Contract-Propagating Monomorphic Generics** to eliminate boilerplate while preserving verifiability.
 
@@ -745,7 +963,7 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 > - **Declaration-time Checking**: Type errors caught at generic definition, not instantiation (unlike Zig)
 > - **Explicit Bounds**: No implicit interface satisfaction (unlike Go)
 
-### v0.16.0: Parametric Data Types & Region Memory
+### v0.19.0: Parametric Data Types & Region Memory
 
 **Goal**: Type parameters for structs/enums + memory region foundations
 
@@ -811,7 +1029,7 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 - Monomorphization produces specialized code
 - Region-scoped allocation verified at compile time
 
-### v0.17.0: Generic Functions & Effect System
+### v0.20.0: Generic Functions & Effect System
 
 **Goal**: Type-parameterized functions with contract propagation
 
@@ -887,7 +1105,7 @@ Generic Contract          │ Instantiated Contract
 - Effect system integrates with contract verification
 - @pure functions provably side-effect free
 
-### v0.18.0: Bounded Generics & Liquid Types
+### v0.21.0: Bounded Generics & Liquid Types
 
 **Goal**: Contract-based type bounds + refinement types
 
@@ -976,11 +1194,11 @@ Generic Contract          │ Instantiated Contract
 
 ---
 
-## Silver Stage (v0.19 - v0.21): LLVM Integration
+## Silver Stage (v0.22 - v0.24): LLVM Integration
 
 **Goal**: Translate contract knowledge into LLVM optimization hints
 
-### v0.19.0: LLVM Backend Foundation
+### v0.22.0: LLVM Backend Foundation
 
 | Task | Description | Priority |
 |------|-------------|----------|
@@ -998,7 +1216,7 @@ BMB Source → AST → TypedProgram → VerifiedProgram → LLVM IR → Native
                                   LLVM Metadata
 ```
 
-### v0.20.0: Contract-Driven Metadata
+### v0.23.0: Contract-Driven Metadata
 
 | Task | Description | LLVM Feature |
 |------|-------------|--------------|
@@ -1027,7 +1245,7 @@ define i32 @process(i32 %x) {
 - Contract proofs generate LLVM metadata
 - 10-30% performance improvement over basic codegen
 
-### v0.21.0: Advanced LLVM Optimization
+### v0.24.0: Advanced LLVM Optimization
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -1054,11 +1272,11 @@ bmbc compile program.bmb --emit llvm --pgo-use=profile.data -o program
 
 ---
 
-## Gold Stage (v0.22 - v0.24): Performance Transcendence
+## Gold Stage (v0.25 - v0.27): Performance Transcendence
 
 **Goal**: Surpass C/Rust through proof-guided optimization
 
-### v0.22.0: Proof-Guided Loop Optimization
+### v0.25.0: Proof-Guided Loop Optimization
 
 | Task | Description | Optimization Enabled |
 |------|-------------|---------------------|
@@ -1099,7 +1317,7 @@ define i64 @sum_array([N x i32]* %arr, i32 %len) {
 }
 ```
 
-### v0.23.0: Comptime Execution
+### v0.26.0: Comptime Execution
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -1135,7 +1353,7 @@ _recurse:
   ret %result
 ```
 
-### v0.24.0: SIMD & Vectorization
+### v0.27.0: SIMD & Vectorization
 
 | Task | Description | Target |
 |------|-------------|--------|
@@ -1242,6 +1460,7 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 13.0 | 2025-12-24 | v0.13.0 Complete: Box<T>/unbox/drop opcodes, enhanced Span, ErrorCollector, File I/O abstraction, CLI argument parser. **Roadmap restructured**: Added v0.14 (Contract Inference), v0.15 (Pattern Matching), v0.16-v0.18 (Self-Hosting phases). Bronze→v0.19-v0.21, Silver→v0.22-v0.24, Gold→v0.25-v0.27. Added Boilerplate Reduction Strategy section. |
 | 12.1 | 2025-12-24 | Bronze Stage reorganized: Contract-Propagating Monomorphic Generics integrated (v0.16 Parametric Data Types, v0.17 Generic Functions, v0.18 Bounded Generics) |
 | 12.0 | 2025-12-24 | v0.12.0 Complete: @extern FFI with calling conventions, @pub visibility annotation, WASM import modules |
 | 11.0 | 2025-12-24 | v0.11.0 Complete: Diagnostics struct + JSON serialization, LSP-compatible errors, SMT counterexample visualization, invariant suggestion with SMT verification and CLI --suggest-invariants |
