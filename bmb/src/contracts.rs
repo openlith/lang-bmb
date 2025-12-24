@@ -759,6 +759,7 @@ mod tests {
 
     fn make_simple_program() -> TypedProgram {
         let node = Node {
+            is_public: false,
             name: Identifier::new("test", Span::default()),
             tags: vec![],
             params: vec![],
@@ -777,6 +778,7 @@ mod tests {
 
         TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],
@@ -876,6 +878,7 @@ mod tests {
     #[test]
     fn test_verify_with_assertions() {
         let node = Node {
+            is_public: false,
             name: Identifier::new("test", Span::default()),
             tags: vec![],
             params: vec![crate::ast::Parameter {
@@ -906,6 +909,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],

@@ -10,10 +10,12 @@ use std::fmt;
 pub struct Program {
     /// Module declaration (@module / @.) - Index system
     pub module: Option<ModuleDecl>,
-    /// External function imports (@import)
+    /// External function imports (@import) - legacy simple form
     pub imports: Vec<Import>,
     /// Module imports (@use)
     pub uses: Vec<ModuleUse>,
+    /// External function declarations (@extern) - v0.12+ FFI with calling conventions
+    pub extern_defs: Vec<ExternDef>,
     /// Refined type definitions (@type) - v0.8+
     pub type_defs: Vec<TypeDef>,
     pub structs: Vec<StructDef>,
@@ -130,11 +132,70 @@ pub struct TypeDef {
     pub span: Span,
 }
 
-/// An external function import
+/// An external function import (legacy, simple form)
 #[derive(Debug, Clone)]
 pub struct Import {
     pub name: Identifier,
     pub param_types: Vec<Type>,
+    pub span: Span,
+}
+
+/// Calling convention for FFI (v0.12+)
+/// Follows platform ABI specifications for interoperability
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallingConvention {
+    /// C calling convention (System V AMD64 on Unix, CDECL on Windows)
+    C,
+    /// Platform default (same as C on most platforms)
+    System,
+    /// Windows x64 calling convention (RCX, RDX, R8, R9)
+    Win64,
+    /// System V AMD64 ABI (RDI, RSI, RDX, RCX, R8, R9)
+    SysV64,
+}
+
+impl Default for CallingConvention {
+    fn default() -> Self {
+        CallingConvention::C
+    }
+}
+
+impl std::fmt::Display for CallingConvention {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallingConvention::C => write!(f, "C"),
+            CallingConvention::System => write!(f, "system"),
+            CallingConvention::Win64 => write!(f, "win64"),
+            CallingConvention::SysV64 => write!(f, "sysv64"),
+        }
+    }
+}
+
+/// External function declaration with explicit calling convention (v0.12+)
+/// FFI declarations must be explicit about calling conventions - "Omission is guessing"
+///
+/// Example:
+/// ```bmb
+/// @extern "C" from "libc"
+/// @node puts
+/// @params s:*i8
+/// @returns i32
+/// @pre valid(s)
+/// ```
+#[derive(Debug, Clone)]
+pub struct ExternDef {
+    /// Calling convention: "C", "system", "win64", "sysv64"
+    pub calling_convention: CallingConvention,
+    /// Source module/library (optional): from "libc"
+    pub source_module: Option<String>,
+    /// Function name
+    pub name: Identifier,
+    /// Typed parameters with names
+    pub params: Vec<Parameter>,
+    /// Return type
+    pub returns: Type,
+    /// Preconditions checked before calling external function
+    pub preconditions: Vec<Expr>,
     pub span: Span,
 }
 
@@ -169,6 +230,9 @@ pub struct Requires {
 /// A function node in BMB
 #[derive(Debug, Clone)]
 pub struct Node {
+    /// Visibility: @pub marks function for export (v0.12+)
+    /// Default is private; backwards compatibility: if no functions are @pub, all are exported
+    pub is_public: bool,
     pub name: Identifier,
     /// Tags for Index system (@tags / @#) - replaces documentation
     pub tags: Vec<Identifier>,

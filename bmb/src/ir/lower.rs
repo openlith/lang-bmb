@@ -487,6 +487,7 @@ mod tests {
         //   mov %result 42
         //   ret %result
         let node = Node {
+            is_public: false,
             name: Identifier::new("main", Span::default()),
             tags: vec![],
             params: vec![],
@@ -519,6 +520,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],
@@ -554,6 +556,7 @@ mod tests {
         };
 
         let node = Node {
+            is_public: false,
             name: Identifier::new("add_fn", Span::default()),
             tags: vec![],
             params: vec![make_param("x", Type::I32), make_param("y", Type::I32)],
@@ -572,6 +575,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],
@@ -622,6 +626,7 @@ mod tests {
         ];
 
         let node = Node {
+            is_public: false,
             name: Identifier::new("branch_fn", Span::default()),
             tags: vec![],
             params: vec![make_param("cond", Type::Bool)],
@@ -643,6 +648,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],

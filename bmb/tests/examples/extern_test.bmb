@@ -1,0 +1,19 @@
+# Test @extern FFI declaration (v0.12+)
+# External function with C calling convention
+
+@extern "C" from "libc"
+@node puts
+@params s:*i8
+@returns i32
+@pre s != 0
+
+@extern "C"
+@node exit
+@params code:i32
+@returns void
+
+@node main
+@params
+@returns i32
+  mov %result 0
+  ret %result

@@ -456,6 +456,7 @@ mod tests {
         let mut codegen = Arm64Codegen::new();
 
         let node = Node {
+            is_public: false,
             name: Identifier::new("main", Span::default()),
             tags: vec![],
             params: vec![],
@@ -482,6 +483,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],
@@ -506,6 +508,7 @@ mod tests {
         let mut codegen = Arm64Codegen::new();
 
         let node = Node {
+            is_public: false,
             name: Identifier::new("main", Span::default()),
             tags: vec![],
             params: vec![],
@@ -530,6 +533,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],

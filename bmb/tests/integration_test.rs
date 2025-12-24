@@ -1777,3 +1777,237 @@ fn test_execute_i8_arithmetic() {
     let result = calc_i8.call(&mut store, (10, 5)).expect("call failed");
     assert_eq!(result, 15);
 }
+
+#[test]
+fn test_extern_parsing() {
+    // Test @extern FFI declaration parsing (v0.12+)
+    // Extern functions with various calling conventions
+    let source = r#"
+# External C function declaration
+@extern "C" from "libc"
+@node puts
+@params s:*i8
+@returns i32
+@pre s != 0
+
+# External function without source module
+@extern "C"
+@node exit
+@params code:i32
+@returns void
+
+# System calling convention
+@extern "system"
+@node syscall
+@params num:i64 a:i64 b:i64
+@returns i64
+
+# Main function that doesn't call externs (just parsing test)
+@node main
+@params
+@returns i32
+  mov %result 0
+  ret %result
+"#;
+
+    // Parse and typecheck (don't generate code since externs aren't linked)
+    let ast = parser::parse(source).expect("parsing failed");
+
+    // Verify extern functions are parsed correctly
+    assert_eq!(ast.extern_defs.len(), 3);
+
+    // Check first extern (puts)
+    let puts = &ast.extern_defs[0];
+    assert_eq!(puts.name.name, "puts");
+    assert_eq!(puts.source_module, Some("libc".to_string()));
+    assert_eq!(puts.params.len(), 1);
+    assert_eq!(puts.preconditions.len(), 1);
+
+    // Check second extern (exit)
+    let exit = &ast.extern_defs[1];
+    assert_eq!(exit.name.name, "exit");
+    assert_eq!(exit.source_module, None);
+    assert_eq!(exit.params.len(), 1);
+
+    // Check third extern (syscall)
+    let syscall = &ast.extern_defs[2];
+    assert_eq!(syscall.name.name, "syscall");
+    assert_eq!(syscall.params.len(), 3);
+
+    // Typecheck should succeed
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    assert_eq!(typed.extern_defs.len(), 3);
+}
+
+#[test]
+fn test_extern_wasm_import_module_names() {
+    // Test that @extern declarations generate proper WASM imports with module names (v0.12+)
+    // WASM uses two-level namespace: (import "module" "function" ...)
+    let source = r#"
+# External C function with explicit source module
+@extern "C" from "custom_lib"
+@node my_print
+@params value:i32
+@returns void
+
+# External function without module (defaults to "env")
+@extern "C"
+@node default_func
+@params x:i32
+@returns i32
+
+# Main function (required for valid program)
+@node main
+@params
+@returns i32
+  mov %result 0
+  ret %result
+"#;
+
+    // Compile to WASM
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    // Create wasmtime module and inspect imports
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+
+    // Collect imports for verification
+    let imports: Vec<_> = module.imports().collect();
+
+    // Should have 2 imports from extern definitions
+    assert!(imports.len() >= 2, "Expected at least 2 imports, got {}", imports.len());
+
+    // Find the custom_lib::my_print import
+    let custom_import = imports.iter()
+        .find(|i| i.module() == "custom_lib" && i.name() == "my_print");
+    assert!(custom_import.is_some(), "Expected import from 'custom_lib' module with name 'my_print'");
+
+    // Find the env::default_func import (default module name)
+    let env_import = imports.iter()
+        .find(|i| i.module() == "env" && i.name() == "default_func");
+    assert!(env_import.is_some(), "Expected import from 'env' module with name 'default_func'");
+}
+
+#[test]
+fn test_xcall_to_extern_function() {
+    // Test that xcall can call extern functions (v0.12+)
+    // The generated WASM should have a call instruction to the imported function
+    let source = r#"
+# External logging function
+@extern "C" from "logger"
+@node log_value
+@params value:i32
+@returns void
+
+# Main function that calls the extern
+@node main
+@params
+@returns i32
+  mov %x 42
+  xcall log_value %x
+  mov %result 0
+  ret %result
+"#;
+
+    // Compile to WASM
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    // Create wasmtime module and verify it's valid
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+
+    // Verify the logger import exists
+    let imports: Vec<_> = module.imports().collect();
+    let logger_import = imports.iter()
+        .find(|i| i.module() == "logger" && i.name() == "log_value");
+    assert!(logger_import.is_some(), "Expected import from 'logger' module with name 'log_value'");
+
+    // Verify main function is exported
+    let exports: Vec<_> = module.exports().collect();
+    let main_export = exports.iter().find(|e| e.name() == "main");
+    assert!(main_export.is_some(), "Expected export 'main'");
+}
+
+#[test]
+fn test_pub_visibility_annotation() {
+    // v0.12+: @pub marks functions for export
+    // Non-@pub functions should NOT be exported when @pub exists
+    let source = r#"
+# Public function - should be exported
+@pub
+@node public_add
+@params a:i32 b:i32
+@returns i32
+  add %r a b
+  ret %r
+
+# Private function - should NOT be exported
+@node private_helper
+@params x:i32
+@returns i32
+  mul %r x 2
+  ret %r
+"#;
+
+    // Compile to WASM
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    // Create wasmtime module
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+
+    // Verify exports
+    let exports: Vec<_> = module.exports().collect();
+    let export_names: Vec<&str> = exports.iter().map(|e| e.name()).collect();
+
+    // public_add should be exported
+    assert!(export_names.contains(&"public_add"), "Expected @pub function 'public_add' to be exported");
+    
+    // private_helper should NOT be exported (because we have @pub functions)
+    assert!(!export_names.contains(&"private_helper"), 
+            "Non-@pub function 'private_helper' should NOT be exported when @pub exists");
+}
+
+#[test]
+fn test_pub_visibility_backwards_compatibility() {
+    // v0.12+: If NO @pub exists, all functions are exported (backwards compatibility)
+    let source = r#"
+# Legacy code without @pub - all should be exported
+@node func_a
+@params x:i32
+@returns i32
+  ret x
+
+@node func_b
+@params y:i32
+@returns i32
+  mul %r y 2
+  ret %r
+"#;
+
+    // Compile to WASM
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    // Create wasmtime module
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+
+    // Verify exports - both should be exported (backwards compatibility)
+    let exports: Vec<_> = module.exports().collect();
+    let export_names: Vec<&str> = exports.iter().map(|e| e.name()).collect();
+
+    assert!(export_names.contains(&"func_a"), "Legacy function 'func_a' should be exported");
+    assert!(export_names.contains(&"func_b"), "Legacy function 'func_b' should be exported");
+}

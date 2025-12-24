@@ -3,7 +3,7 @@
 > **"Omission is guessing, and guessing is error."**
 
 **Last Updated**: 2025-12-24
-**Current Version**: v0.11.0
+**Current Version**: v0.12.0
 **Target**: v1.0.0 (Performance Transcendence)
 
 ---
@@ -24,7 +24,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ---
 
-## Current State (v0.10.0)
+## Current State (v0.12.0)
 
 ### Implemented Features
 
@@ -37,9 +37,10 @@ v1.0.0: Performance Transcendence Complete 🎯
 | **Strings** | String (owned), Str (view), UTF-8 validity |
 | **Contracts** | @pre, @post, @invariant, @requires, @pure, @contract, @assert, @variant, runtime & static verification |
 | **Linear Types** | @consume (use-once), @device (MMIO), @volatile (hardware regs) |
+| **FFI** | @extern with calling conventions (C/SysV64/Win64), @pub visibility, WASM import modules |
 | **Codegen** | WASM, x64 ELF64/PE64/Mach-O64, ARM64 ELF64 |
 | **Verification** | SMT (Z3/CVC4/CVC5), static contract proving (Gold level), purity checking, linear type checking |
-| **DevEx** | LSP server, formatter, linter |
+| **DevEx** | LSP server, formatter, linter, SMT counterexamples, invariant suggestions |
 | **Modules** | @use, @import, qualified calls, namespace |
 | **Optimization** | IR, constant folding, DCE, function inlining |
 | **Package Manager** | Gotgan with Cargo fallback |
@@ -534,18 +535,81 @@ error[E202]: Postcondition violation
 
 ---
 
-## v0.12.0: FFI & Interoperability
+## v0.12.0: FFI & Interoperability ✅ COMPLETE
 
-**Goal**: Seamless integration with Rust/C ecosystem
+**Goal**: Seamless integration with Rust/C ecosystem via explicit calling conventions
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| C FFI (`extern "C"`) | Critical | High |
-| Rust FFI with type mapping | Critical | Very High |
-| `@extern` annotation | High | Medium |
-| Automatic bindgen for simple types | High | Very High |
-| WASM import/export refinement | High | Medium |
-| Cross-language contract propagation | Medium | Very High |
+| Task | Priority | Complexity | Status |
+|------|----------|------------|--------|
+| `@extern` annotation with calling convention | Critical | High | ✅ Done |
+| C ABI (`extern "C"`, System V) | Critical | High | ✅ Done |
+| Windows x64 ABI (`extern "win64"`) | High | Medium | ✅ Done |
+| WASM import module names | High | Medium | ✅ Done |
+| `@pub` export visibility annotation | High | Medium | ✅ Done |
+| `xcall` extern function integration | High | Medium | ✅ Done |
+| Cross-language contract propagation | Medium | Very High | Planned |
+| Automatic bindgen | Medium | Very High | Planned |
+
+### @extern Declaration (v0.12+)
+
+Explicit FFI declarations with calling convention specification:
+
+```bmb
+# C function with System V ABI (Linux/macOS)
+@extern "C" from "libc"
+@node puts
+@params s:*i8
+@returns i32
+@pre valid(s)
+
+# Windows-specific function
+@extern "win64" from "kernel32"
+@node GetLastError
+@params
+@returns u32
+
+# Default env module (no "from")
+@extern "C"
+@node custom_logger
+@params msg:*i8 level:i32
+@returns void
+```
+
+### @pub Visibility (v0.12+)
+
+Explicit export control with backwards compatibility:
+
+```bmb
+# Public - exported from module
+@pub
+@node public_api
+@params x:i32
+@returns i32
+  ret x
+
+# Private - NOT exported (when any @pub exists)
+@node internal_helper
+@params y:i32
+@returns i32
+  ret y
+
+# Legacy: If NO @pub in file, all functions are exported (backwards compatible)
+```
+
+### Calling Conventions
+
+| Convention | Registers (Args) | Return | Use Case |
+|------------|------------------|--------|----------|
+| `"C"` (SysV64) | RDI, RSI, RDX, RCX, R8, R9 | RAX | Linux, macOS |
+| `"win64"` | RCX, RDX, R8, R9 | RAX | Windows x64 |
+| `"system"` | Platform default | RAX | Auto-select |
+
+### Philosophy Alignment
+
+- ✅ Explicit calling conventions ("Omission is guessing")
+- ✅ Two-level WASM namespace (module + function name)
+- ✅ Contract support for extern functions (@pre only)
+- ✅ Backwards-compatible visibility defaults
 
 **Type Mapping**:
 | Rust Type | BMB Type | Notes |

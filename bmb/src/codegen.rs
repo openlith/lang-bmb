@@ -207,15 +207,43 @@ impl CodeGenerator {
             self.next_func_idx += 1;
         }
 
+        // First pass (continued): register extern functions with explicit module names (v0.12+)
+        // Extern functions use two-level namespace: module/function
+        for extern_def in &program.extern_defs {
+            let type_idx = self.register_extern_type(extern_def)?;
+            self.function_indices
+                .insert(extern_def.name.name.clone(), self.next_func_idx);
+            // Use source_module if specified, otherwise default to "env"
+            let module_name = extern_def
+                .source_module
+                .as_deref()
+                .unwrap_or("env");
+            self.imports.import(
+                module_name,
+                &extern_def.name.name,
+                wasm_encoder::EntityType::Function(type_idx),
+            );
+            self.next_func_idx += 1;
+        }
+
         // Second pass: register local function types
+        // Check if any function has @pub annotation for backwards compatibility (v0.12+)
+        // If no functions have @pub, export all (legacy behavior)
+        // If any function has @pub, only export @pub functions
+        let has_any_public = program.nodes.iter().any(|n| n.node.is_public);
+
         for typed_node in &program.nodes {
             let node = &typed_node.node;
             let type_idx = self.register_function_type(node)?;
             self.function_indices
                 .insert(node.name.name.clone(), self.next_func_idx);
             self.functions.function(type_idx);
-            self.exports
-                .export(&node.name.name, ExportKind::Func, self.next_func_idx);
+
+            // Export based on visibility: if no @pub exists, export all; otherwise only @pub
+            if !has_any_public || node.is_public {
+                self.exports
+                    .export(&node.name.name, ExportKind::Func, self.next_func_idx);
+            }
             self.next_func_idx += 1;
         }
 
@@ -235,6 +263,26 @@ impl CodeGenerator {
             .collect();
         // Imported functions (like print_i32) don't return values
         let results: Vec<ValType> = vec![];
+
+        let type_idx = self.next_type_idx;
+        self.types.ty().function(params, results);
+        self.next_type_idx += 1;
+        Ok(type_idx)
+    }
+
+    /// Register type for @extern function declaration (v0.12+)
+    /// Unlike legacy imports, extern functions have explicit return types
+    fn register_extern_type(&mut self, extern_def: &crate::ast::ExternDef) -> Result<u32> {
+        let params: Vec<ValType> = extern_def
+            .params
+            .iter()
+            .map(|p| type_to_valtype(&p.ty))
+            .collect();
+        // Extern functions have explicit return types (unlike legacy imports)
+        let results: Vec<ValType> = match &extern_def.returns {
+            crate::ast::Type::Void => vec![],
+            ty => vec![type_to_valtype(ty)],
+        };
 
         let type_idx = self.next_type_idx;
         self.types.ty().function(params, results);
@@ -1316,6 +1364,7 @@ mod tests {
     ) -> TypedNode {
         TypedNode {
             node: Node {
+                is_public: false,
                 name: Identifier::new(name, Span::default()),
                 tags: vec![],
                 params,
@@ -1407,6 +1456,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],
@@ -1459,6 +1509,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],
@@ -1507,6 +1558,7 @@ mod tests {
 
         let program = TypedProgram {
             imports: vec![],
+            extern_defs: vec![],
             structs: vec![],
             enums: vec![],
             type_defs: vec![],

@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Instruction, Opcode, Operand, Statement};
+use crate::ast::{CallingConvention, ExternDef, Instruction, Opcode, Operand, Statement};
 use crate::types::TypedProgram;
 use crate::BmbError;
 
 use super::encoding::CodeBuffer;
-use super::registers::{Reg64, SCRATCH_REGS, SYSV_ARG_REGS, SYSV_RET_REG};
+use super::registers::{Reg64, SCRATCH_REGS, SYSV_ARG_REGS, WIN64_ARG_REGS, SYSV_RET_REG};
 
 /// Linux x86-64 syscall numbers
 pub mod syscall {
@@ -48,6 +48,9 @@ pub struct X64Codegen {
     labels: HashMap<String, usize>,
     /// Pending label fixups: (patch_offset, label_name)
     label_fixups: Vec<(usize, String)>,
+    /// Extern function definitions (v0.12+)
+    /// Used to determine calling conventions for xcall
+    extern_defs: HashMap<String, ExternDef>,
 }
 
 impl X64Codegen {
@@ -60,11 +63,17 @@ impl X64Codegen {
             relocations: Vec::new(),
             labels: HashMap::new(),
             label_fixups: Vec::new(),
+            extern_defs: HashMap::new(),
         }
     }
 
     /// Compile a typed program to x64 machine code (functions only, no entry point)
     pub fn compile(&mut self, program: &TypedProgram) -> Result<Vec<u8>, BmbError> {
+        // Register extern functions for calling convention lookup (v0.12+)
+        for extern_def in &program.extern_defs {
+            self.extern_defs.insert(extern_def.name.name.clone(), extern_def.clone());
+        }
+
         // Generate code for each function
         for node in &program.nodes {
             self.compile_function(node)?;
@@ -79,6 +88,11 @@ impl X64Codegen {
     /// Compile a typed program to a standalone x64 executable
     /// Generates _start entry point that calls main, prints result, and exits
     pub fn compile_executable(&mut self, program: &TypedProgram) -> Result<Vec<u8>, BmbError> {
+        // Register extern functions for calling convention lookup (v0.12+)
+        for extern_def in &program.extern_defs {
+            self.extern_defs.insert(extern_def.name.name.clone(), extern_def.clone());
+        }
+
         // First, emit _start which will jump over the functions to call main
         let start_offset = self.code.offset();
 
@@ -1017,6 +1031,53 @@ impl X64Codegen {
             }
         };
 
+        // Check if this is an extern function (v0.12+)
+        if let Some(extern_def) = self.extern_defs.get(&func_name).cloned() {
+            // Set up arguments according to calling convention
+            let arg_regs = match extern_def.calling_convention {
+                CallingConvention::C | CallingConvention::SysV64 => &SYSV_ARG_REGS[..],
+                CallingConvention::Win64 | CallingConvention::System => &WIN64_ARG_REGS[..],
+            };
+
+            // Move arguments to calling convention registers
+            let args = &stmt.operands[1..]; // Skip function name operand
+            for (i, arg) in args.iter().enumerate() {
+                if i >= arg_regs.len() {
+                    return Err(BmbError::CodegenError {
+                        message: format!(
+                            "Too many arguments for extern function '{}': {} provided, max {} for calling convention {:?}",
+                            func_name,
+                            args.len(),
+                            arg_regs.len(),
+                            extern_def.calling_convention
+                        ),
+                    });
+                }
+                let target_reg = arg_regs[i];
+                let src_reg = self.operand_to_reg(arg, Some(target_reg))?;
+                if src_reg != target_reg {
+                    self.code.mov_r64_r64(target_reg, src_reg);
+                }
+            }
+
+            // NOTE: Actual extern function calls require dynamic linking support
+            // which is not yet implemented for native x64 executables.
+            // For now, emit a placeholder that documents the extern call setup.
+            // Future versions will add PLT/GOT support for Linux and IAT for Windows.
+            //
+            // The WASM backend fully supports extern function calls via imports.
+            return Err(BmbError::CodegenError {
+                message: format!(
+                    "Extern function call '{}' with {:?} calling convention: \
+                     Native x64 extern calls require dynamic linking (future work). \
+                     Use WASM target (--emit wasm) for full extern function support.",
+                    func_name,
+                    extern_def.calling_convention
+                ),
+            });
+        }
+
+        // Handle built-in external functions
         match func_name.as_str() {
             "print_i32" | "print_i64" => {
                 let val = self.operand_to_reg(&stmt.operands[1], Some(Reg64::RDI))?;

@@ -37,6 +37,7 @@ pub fn parse(source: &str) -> Result<Program> {
     let mut module = None;
     let mut imports = Vec::new();
     let mut uses = Vec::new();
+    let mut extern_defs = Vec::new();
     let mut type_defs = Vec::new();
     let mut structs = Vec::new();
     let mut enums = Vec::new();
@@ -56,6 +57,9 @@ pub fn parse(source: &str) -> Result<Program> {
                 }
                 Rule::use_module => {
                     uses.push(parse_use_module(pair)?);
+                }
+                Rule::extern_def => {
+                    extern_defs.push(parse_extern_def(pair)?);
                 }
                 Rule::type_def => {
                     type_defs.push(parse_type_def(pair)?);
@@ -85,6 +89,7 @@ pub fn parse(source: &str) -> Result<Program> {
         module,
         imports,
         uses,
+        extern_defs,
         type_defs,
         structs,
         enums,
@@ -161,6 +166,100 @@ fn parse_use_module(pair: pest::iterators::Pair<Rule>) -> Result<ModuleUse> {
     let alias = inner.next().map(|p| parse_identifier(p)).transpose()?;
 
     Ok(ModuleUse { path, alias, span })
+}
+
+/// Parse external function declaration (v0.12+):
+/// @extern "C" from "libc"
+/// @node puts
+/// @params s:*i8
+/// @returns i32
+/// @pre valid(s)
+fn parse_extern_def(pair: pest::iterators::Pair<Rule>) -> Result<ExternDef> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    // Parse calling convention (required)
+    let conv_pair = inner.next().unwrap();
+    let conv_str = parse_string_literal(conv_pair)?;
+    let calling_convention = match conv_str.to_lowercase().as_str() {
+        "c" | "cdecl" => CallingConvention::C,
+        "system" => CallingConvention::System,
+        "win64" | "windows" => CallingConvention::Win64,
+        "sysv64" | "sysv" => CallingConvention::SysV64,
+        _ => {
+            return Err(BmbError::ParseError {
+                line: span.line,
+                column: span.column,
+                message: format!(
+                    "Unknown calling convention '{}'. Supported: C, system, win64, sysv64",
+                    conv_str
+                ),
+            });
+        }
+    };
+
+    // Parse remaining fields
+    let mut source_module = None;
+    let mut name = None;
+    let mut params = Vec::new();
+    let mut returns = Type::Void;
+    let mut preconditions = Vec::new();
+
+    for item in inner {
+        match item.as_rule() {
+            Rule::extern_from => {
+                // extern_from = { "from" ~ str_literal }
+                let str_pair = item.into_inner().next().unwrap();
+                source_module = Some(parse_string_literal(str_pair)?);
+            }
+            Rule::ident => {
+                name = Some(parse_identifier(item)?);
+            }
+            Rule::params => {
+                params = parse_params(item)?;
+            }
+            Rule::returns => {
+                returns = parse_type(item.into_inner().next().unwrap())?;
+            }
+            Rule::extern_contracts => {
+                // Parse preconditions only (extern can't have postconditions)
+                for contract in item.into_inner() {
+                    if contract.as_rule() == Rule::extern_pre {
+                        let expr_pair = contract.into_inner().next().unwrap();
+                        preconditions.push(parse_expr(expr_pair)?);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let name = name.ok_or_else(|| BmbError::ParseError {
+        line: span.line,
+        column: span.column,
+        message: "Extern function missing name".to_string(),
+    })?;
+
+    Ok(ExternDef {
+        calling_convention,
+        source_module,
+        name,
+        params,
+        returns,
+        preconditions,
+        span,
+    })
+}
+
+/// Parse a string literal (removes surrounding quotes)
+fn parse_string_literal(pair: pest::iterators::Pair<Rule>) -> Result<String> {
+    let s = pair.as_str();
+    // Remove surrounding quotes
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        Ok(s[1..s.len() - 1].to_string())
+    } else {
+        Ok(s.to_string())
+    }
 }
 
 /// Parse device definition: @device UART_BASE 0x40000000
@@ -371,7 +470,15 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
     let span = pair_to_span(&pair);
     let mut inner = pair.into_inner();
 
-    let name = parse_identifier(inner.next().unwrap())?;
+    // Check for visibility annotation (v0.12+: @pub)
+    let mut is_public = false;
+    let first = inner.next().unwrap();
+    let name = if first.as_rule() == Rule::visibility {
+        is_public = true;
+        parse_identifier(inner.next().unwrap())?
+    } else {
+        parse_identifier(first)?
+    };
 
     // Initialize all node fields
     let mut tags = Vec::new();
@@ -485,6 +592,7 @@ fn parse_node(pair: pest::iterators::Pair<Rule>) -> Result<Node> {
     }
 
     Ok(Node {
+        is_public,
         name,
         tags,
         params,

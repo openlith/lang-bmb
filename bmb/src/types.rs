@@ -124,6 +124,8 @@ impl TypeRegistry {
 #[derive(Debug, Clone)]
 pub struct TypedProgram {
     pub imports: Vec<Import>,
+    /// External function declarations (v0.12+)
+    pub extern_defs: Vec<ExternDef>,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     /// Refined type definitions
@@ -319,6 +321,23 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
         global_env.add_function(&import.name.name, sig);
     }
 
+    // Phase 3b: Collect extern function signatures (v0.12+)
+    // Extern functions have explicit calling conventions and full type information
+    for extern_def in &program.extern_defs {
+        // Validate parameter types
+        for param in &extern_def.params {
+            validate_type(&param.ty, &registry)?;
+        }
+        // Validate return type
+        validate_type(&extern_def.returns, &registry)?;
+
+        let sig = FunctionSig {
+            params: extern_def.params.iter().map(|p| p.ty.clone()).collect(),
+            returns: extern_def.returns.clone(),
+        };
+        global_env.add_function(&extern_def.name.name, sig);
+    }
+
     // Phase 4: Collect local function signatures (validate types first)
     for node in &program.nodes {
         // Validate parameter types
@@ -343,6 +362,7 @@ pub fn typecheck(program: &Program) -> Result<TypedProgram> {
 
     Ok(TypedProgram {
         imports: program.imports.clone(),
+        extern_defs: program.extern_defs.clone(),
         structs: program.structs.clone(),
         enums: program.enums.clone(),
         type_defs: program.type_defs.clone(),
@@ -384,6 +404,22 @@ pub fn typecheck_merged(merged: &crate::modules::MergedProgram) -> Result<TypedP
         }
     }
 
+    // Phase 1b: Register extern function signatures (v0.12+)
+    for extern_def in &merged.main.extern_defs {
+        // Validate parameter types
+        for param in &extern_def.params {
+            validate_type(&param.ty, &registry)?;
+        }
+        // Validate return type
+        validate_type(&extern_def.returns, &registry)?;
+
+        let sig = FunctionSig {
+            params: extern_def.params.iter().map(|p| p.ty.clone()).collect(),
+            returns: extern_def.returns.clone(),
+        };
+        global_env.add_function(&extern_def.name.name, sig);
+    }
+
     // Phase 2: Register main program functions
     for node in &merged.main.nodes {
         let sig = FunctionSig {
@@ -401,6 +437,7 @@ pub fn typecheck_merged(merged: &crate::modules::MergedProgram) -> Result<TypedP
 
     Ok(TypedProgram {
         imports: merged.main.imports.clone(),
+        extern_defs: merged.main.extern_defs.clone(),
         structs: merged.main.structs.clone(),
         enums: merged.main.enums.clone(),
         type_defs: merged.main.type_defs.clone(),
@@ -1706,6 +1743,7 @@ _less:
     fn test_linear_type_used_once() {
         // @consume param used exactly once: should pass
         let node = Node {
+            is_public: false,
             name: Identifier::new("free_buffer", Span::default()),
             tags: vec![],
             params: vec![Parameter {
@@ -1746,6 +1784,7 @@ _less:
     fn test_linear_type_never_used() {
         // @consume param never used: should fail
         let node = Node {
+            is_public: false,
             name: Identifier::new("unused_buffer", Span::default()),
             tags: vec![],
             params: vec![Parameter {
@@ -1794,6 +1833,7 @@ _less:
     fn test_linear_type_used_twice() {
         // @consume param used twice: should fail
         let node = Node {
+            is_public: false,
             name: Identifier::new("double_use", Span::default()),
             tags: vec![],
             params: vec![Parameter {
@@ -1845,6 +1885,7 @@ _less:
     fn test_regular_param_no_linear_check() {
         // Regular param (no annotation) can be used any number of times
         let node = Node {
+            is_public: false,
             name: Identifier::new("normal_func", Span::default()),
             tags: vec![],
             params: vec![Parameter {

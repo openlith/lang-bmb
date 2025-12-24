@@ -1,5 +1,13 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.10
+// Version 0.12
+//
+// Changes in 0.12:
+//   - Added @extern for FFI declarations with explicit calling conventions
+//   - Supported conventions: "C" (System V / CDECL), "system" (platform default), "win64" (Windows x64)
+//   - Optional module specification: @extern "C" from "libc"
+//   - Extern functions can have @pre contracts for precondition checking
+//   - Added @pub visibility annotation for export control
+//   - Backwards compatible: if no @pub, all functions exported (legacy behavior)
 //
 // Changes in 0.8:
 //   - Added @type refined type definitions with constraints
@@ -38,8 +46,8 @@
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
-// Program structure - includes module declaration, imports, types, contracts, data, and nodes
-program = { SOI ~ module_decl? ~ (import | use_module)* ~ (type_def | struct_def | enum_def | contract_def | data_def | device_def)* ~ node* ~ EOI }
+// Program structure - includes module declaration, imports, types, contracts, data, externs, and nodes
+program = { SOI ~ module_decl? ~ (import | use_module | extern_def)* ~ (type_def | struct_def | enum_def | contract_def | data_def | device_def)* ~ node* ~ EOI }
 
 // Refined type definition (v0.8+, Signal Density Optimization)
 // @type nz_i32 i32 where self != 0
@@ -117,7 +125,7 @@ enum_def = {
 }
 enum_variant = { ident ~ (":" ~ type_spec)? }
 
-// External function imports
+// External function imports (legacy, simple form)
 // Example: @import print_i32(i32)
 // Example: @import print_newline()
 import = {
@@ -127,10 +135,39 @@ import = {
 // Import parameter types (no names, just types)
 import_params = { type_name ~ ("," ~ type_name)* }
 
+// External function declaration (v0.12+, FFI with explicit calling convention)
+// @extern "C"                    # Required: calling convention
+// @node puts                     # Function name
+// @params s:*i8                  # Typed parameters
+// @returns i32                   # Return type
+// @pre valid(s)                  # Optional contracts
+//
+// Supported conventions: "C" (System V / CDECL), "system" (platform default), "win64" (Windows x64)
+// Optional module: @extern "C" from "libc"
+extern_def = {
+    "@extern" ~ calling_convention ~ extern_from? ~
+    ("@node" | "@n") ~ ident ~
+    params ~
+    returns ~
+    extern_contracts
+}
+
+// Calling convention string
+calling_convention = { str_literal }
+
+// Optional source module specification
+extern_from = { "from" ~ str_literal }
+
+// Contracts for extern functions (only @pre allowed, no implementation to verify @post)
+extern_contracts = { extern_pre* }
+extern_pre = { ("@pre" | "@<") ~ expr }
+
 // Node (function) definition
 // Full syntax: @node, @params, @returns, @pre, @post, @tags, @test
 // Compact:     @n,    @p,      @r,       @<,   @>,    @#,    @?
+// Visibility: @pub (export from module), default is private
 node = {
+    visibility? ~
     ("@node" | "@n") ~ ident ~
     node_tags? ~
     params ~
@@ -139,6 +176,12 @@ node = {
     tests ~
     body
 }
+
+// Visibility annotation (v0.12+)
+// @pub = exported/public (visible from outside the module)
+// Default = private (internal to module)
+// Backwards compatibility: if NO functions have @pub, all are exported
+visibility = { "@pub" | "@+" }
 
 // Tags for Index system (replaces documentation)
 // @tags [math, pure, safe]  OR  @# [math, pure, safe] (compact)
