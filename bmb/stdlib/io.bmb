@@ -1,0 +1,69 @@
+// BMB Standard Library: File I/O (v0.13+)
+//
+// This module defines the file I/O interface for BMB programs.
+// Host environments must provide these functions as WASM imports.
+//
+// Module: bmb:io (import from "bmb" "io")
+//
+// File Descriptor Convention:
+// - 0 = stdin
+// - 1 = stdout
+// - 2 = stderr
+// - 3+ = user files
+//
+// Error Convention:
+// - Negative return values indicate errors
+// - -1 = general error
+// - -2 = file not found
+// - -3 = permission denied
+// - -4 = out of memory
+
+// Open a file by path
+// Returns: file descriptor (>= 0) or error code (< 0)
+// Mode: 0 = read, 1 = write, 2 = append, 3 = read+write
+@extern io_open
+@params path:*u8 path_len:i32 mode:i32
+@returns i32
+
+// Read bytes from file descriptor
+// Returns: bytes read (>= 0) or error code (< 0)
+@extern io_read
+@params fd:i32 buf:*u8 len:i32
+@returns i32
+
+// Write bytes to file descriptor
+// Returns: bytes written (>= 0) or error code (< 0)
+@extern io_write
+@params fd:i32 buf:*u8 len:i32
+@returns i32
+
+// Close a file descriptor
+// Returns: 0 on success, error code on failure
+@extern io_close
+@params fd:i32
+@returns i32
+
+// Get file size
+// Returns: size in bytes (>= 0) or error code (< 0)
+@extern io_size
+@params fd:i32
+@returns i64
+
+// Seek to position in file
+// Whence: 0 = absolute, 1 = relative to current, 2 = relative to end
+// Returns: new position (>= 0) or error code (< 0)
+@extern io_seek
+@params fd:i32 offset:i64 whence:i32
+@returns i64
+
+// Check if file exists
+// Returns: 1 if exists, 0 if not, error code (< 0) on error
+@extern io_exists
+@params path:*u8 path_len:i32
+@returns i32
+
+// Flush file buffers
+// Returns: 0 on success, error code on failure
+@extern io_flush
+@params fd:i32
+@returns i32

@@ -37,6 +37,9 @@ pub mod testing;
 pub mod types;
 pub mod x64;
 
+/// Host interface helpers for WASM runtime environments (v0.13+)
+pub mod host;
+
 use thiserror::Error;
 
 pub use error::{Diagnostic, ErrorCode};
