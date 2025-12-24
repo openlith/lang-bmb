@@ -121,33 +121,45 @@ This document tracks the implementation status of BMB language features across a
 
 ## Known Gaps
 
+> **Roadmap Update**: Gaps addressed by new v0.15.4-v0.15.8 intermediate milestones. See ROADMAP.md for details.
+
 ### Critical (Blocking Features)
 
 1. **x64: No Box/Unbox/Drop support**
    - Impact: Cannot compile heap-allocating code to native
    - Workaround: Use WASM target
-   - Planned: v0.16+ (Self-Hosting phase)
+   - Planned: v0.16+ (Self-Hosting phase) - WASM-first strategy adopted
 
 ### High Priority
 
 2. **Multi-file WASM compilation**
    - Impact: @use works for parsing/typechecking but not full codegen
    - Workaround: Include all code in single file
-   - Planned: v0.16+
+   - Planned: **v0.15.7** (Multi-File WASM Compilation)
 
 3. **x64 pattern matching limited**
    - Impact: Complex @match may fail in native
    - Workaround: Use WASM target
-   - Planned: v0.17+
+   - Planned: v0.17+ (WASM-first for self-hosting)
 
 ### Medium Priority
 
-4. **Array codegen incomplete**
-   - Impact: Dynamic array access limited
-   - Current: Static arrays work
-   - Planned: v0.15.4
+4. **Collection operations (Vector, String)**
+   - Impact: Cannot use Vector<T>, String operations at runtime
+   - Workaround: Use @extern host functions
+   - Planned: **v0.15.4** (Collection Operations via Host Functions)
 
-5. **Generic type codegen**
+5. **Character classification & Enum data**
+   - Impact: Cannot classify characters or create enum variants with data
+   - Workaround: Manual byte comparisons
+   - Planned: **v0.15.5** (Character Classification & Enum Data Construction)
+
+6. **String processing**
+   - Impact: Limited string manipulation (no slice, comparison)
+   - Workaround: Byte-level operations
+   - Planned: **v0.15.6** (String Processing Operations)
+
+7. **Generic type codegen**
    - Impact: Option<T>, Result<T,E> parse but limited codegen
    - Current: Monomorphization needed
    - Planned: v0.19+ (Bronze stage)
@@ -168,17 +180,26 @@ This document tracks the implementation status of BMB language features across a
 
 ## Recommendations
 
-### For v0.16 (Self-Hosting)
+### Immediate Next Steps (v0.15.4-v0.15.8)
 
-1. **Prioritize x64 Box/Unbox/Drop** - Required for heap allocation in self-hosted compiler
-2. **Complete multi-file compilation** - Required for modular compiler design
-3. **Stabilize pattern matching on x64** - Required for AST processing
+1. **v0.15.4**: Implement stdlib host functions for Vector/String operations
+2. **v0.15.5**: Character classification and enum data construction codegen
+3. **v0.15.6**: String processing (comparison, slicing, iteration)
+4. **v0.15.7**: Multi-file WASM compilation with module linking
+5. **v0.15.8**: Self-hosting readiness gate (minimal lexer test)
+
+### For Self-Hosting (v0.16+)
+
+1. **WASM-first strategy** - Use WASM backend (most complete) for self-hosting
+2. **Host function bridge** - Complex operations via @extern until native codegen complete
+3. **x64 Box/Unbox/Drop deferred** - Not blocking WASM self-hosting path
 
 ### For Contributors
 
 - **Target WASM first** - Most complete implementation
 - **x64 is secondary** - Focus on core opcodes
 - **ARM64 placeholder** - Not actively developed
+- **Follow v0.15.x milestones** - Each has clear integration tests
 
 ---
 
@@ -186,4 +207,4 @@ This document tracks the implementation status of BMB language features across a
 
 | Version | Date | Changes |
 |---------|------|---------|
-| v0.15.3 | 2025-12-24 | Initial implementation audit |
+| v0.15.3 | 2025-12-24 | Initial implementation audit, gap analysis completed |

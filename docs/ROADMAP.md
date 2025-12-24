@@ -16,8 +16,8 @@ This roadmap follows BMB's core principle: **no shortcuts, no guessing**. Each v
 
 ```
 v0.6-v0.13: Foundation (Core Language Complete)
-v0.14-v0.15: Self-Hosting Preparation (Boilerplate Reduction, Tooling)
-v0.15.1-v0.15.3: Implementation Hardening (Verify features work)
+v0.14-v0.15.3: Self-Hosting Preparation (Boilerplate Reduction, Audit)
+v0.15.4-v0.15.8: Self-Hosting Prerequisites (Stdlib, Codegen completion) ← NEW
 v0.16-v0.18: Self-Hosting (Incremental Compiler in BMB)
 v0.19-v0.21: Bronze Stage (Advanced Generics & Type System)
 v0.21.1-v0.21.3: Rust Interoperability (C/Rust FFI, Cargo integration)
@@ -28,6 +28,8 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 Parallel Track: Benchmark Suite (Continuous from v0.22+)
 ```
+
+> **Difficulty Calibration (v0.15.4+)**: The gap between v0.15.3 (audit) and v0.16.0 (lexer in BMB) was identified as too large. New intermediate milestones (v0.15.4-v0.15.8) provide gradual stepping stones with clear verification gates.
 
 ### Positioning Philosophy (v0.15+)
 
@@ -956,11 +958,302 @@ cargo test test_load_store_all_types
 - Documentation matches implementation
 - Roadmap updated with realistic timelines
 
+### v0.15.4: Collection Operations via Host Functions
+
+> **Strategy**: Implement complex operations as @extern host functions first, enabling BMB code to use them via xcall. This unblocks self-hosting without requiring full monomorphization.
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| Vector stdlib signatures | Critical | Define @extern for new, push, get, len, drop |
+| String stdlib signatures | Critical | Define @extern for len, byte_at, slice |
+| Host function implementations | Critical | Implement in wasmtime test harness |
+| Integration tests | Critical | Prove operations work end-to-end |
+
+**stdlib/vector.bmb**:
+```bmb
+@extern "C" from "bmb_stdlib"
+@node vector_i32_new
+@params
+@returns *Vector<i32>
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_push
+@params v:*Vector<i32> item:i32
+@returns void
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_get
+@params v:*Vector<i32> idx:u64
+@returns i32
+@pre idx < vector_len(v)
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_len
+@params v:*Vector<i32>
+@returns u64
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_drop
+@params v:*Vector<i32>
+@returns void
+```
+
+**Success Criteria**:
+- Vector operations work via host functions
+- String operations work via host functions
+- Integration tests execute successfully in wasmtime
+
+### v0.15.5: Character Classification & Enum Data Construction
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| Character classification stdlib | Critical | is_digit, is_alpha, is_whitespace, is_newline |
+| Enum variant construction | Critical | Create enum variants with associated data |
+| Enum data extraction | Critical | Pattern match to extract enum payload |
+| Token-like enum test | Critical | Test Token::Number(i64), Token::Ident(String) patterns |
+
+**stdlib/char.bmb**:
+```bmb
+@extern "C" from "bmb_stdlib"
+@node is_digit
+@params c:u8
+@returns bool
+@post ret == (c >= 48 && c <= 57)    # '0'-'9'
+
+@extern "C" from "bmb_stdlib"
+@node is_alpha
+@params c:u8
+@returns bool
+@post ret == ((c >= 65 && c <= 90) || (c >= 97 && c <= 122))
+
+@extern "C" from "bmb_stdlib"
+@node is_whitespace
+@params c:u8
+@returns bool
+@post ret == (c == 32 || c == 9 || c == 10 || c == 13)
+```
+
+**Test Pattern**:
+```bmb
+@enum Token
+  Number: i64
+  Ident: String
+  Plus
+  Eof
+
+@node test_token_creation
+@params
+@returns i32
+  # Create Token::Number(42)
+  mov %tok Token::Number(42)
+
+  # Pattern match to extract value
+  @match %tok
+    Token::Number(n) => ret n
+    @default => ret -1
+  @end
+```
+
+**Success Criteria**:
+- Character classification functions available
+- Enum variants with data can be created
+- Pattern matching extracts data correctly
+
+### v0.15.6: String Processing Operations
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| String equality | Critical | Compare two strings |
+| String slicing | Critical | Extract substring |
+| String iteration | High | Iterate bytes/chars |
+| String building | High | Append, concat operations |
+
+**stdlib/string.bmb**:
+```bmb
+@extern "C" from "bmb_stdlib"
+@node string_eq
+@params a:Str b:Str
+@returns bool
+
+@extern "C" from "bmb_stdlib"
+@node string_slice
+@params s:Str start:u64 end:u64
+@returns Str
+@pre start <= end
+@pre end <= string_len(s)
+
+@extern "C" from "bmb_stdlib"
+@node string_from_bytes
+@params data:*u8 len:u64
+@returns String
+@pre valid(data, len)
+```
+
+**Lexer Pattern Test**:
+```bmb
+# Simulate lexer reading a number
+@node read_number
+@params source:Str pos:*u64
+@returns Token
+  mov %start pos
+  _digit_loop:
+    call %byte string_byte_at source *pos
+    call %is_d is_digit %byte
+    jif %is_d _continue _done
+  _continue:
+    add *pos *pos 1
+    jmp _digit_loop
+  _done:
+    call %slice string_slice source %start *pos
+    call %num parse_int %slice
+    ret Token::Number(%num)
+```
+
+**Success Criteria**:
+- String comparison works
+- String slicing works
+- String iteration pattern executable
+
+### v0.15.7: Multi-File WASM Compilation
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| Module codegen linking | Critical | Merge multiple .bmb files into single WASM |
+| Import resolution | Critical | Resolve @use references at codegen time |
+| Qualified call codegen | Critical | Generate correct call indices for module::func |
+| Export visibility | High | Respect @pub for exports |
+
+**Test Structure**:
+```
+tests/examples/multi_file/
+├── main.bmb          # @use char, @use token
+├── char.bmb          # Character classification module
+└── token.bmb         # Token enum and helpers
+```
+
+**Integration Test**:
+```bmb
+# main.bmb
+@use char
+@use token
+
+@node classify_char
+@params c:u8
+@returns token::CharType
+  call %is_d char::is_digit c
+  jif %is_d _digit _check_alpha
+_digit:
+  ret token::CharType::Digit
+_check_alpha:
+  call %is_a char::is_alpha c
+  jif %is_a _alpha _other
+_alpha:
+  ret token::CharType::Alpha
+_other:
+  ret token::CharType::Other
+```
+
+**Success Criteria**:
+- `bmbc compile main.bmb` resolves and compiles all dependencies
+- Single WASM output contains all modules
+- Qualified calls work correctly
+
+### v0.15.8: Self-Hosting Readiness Verification
+
+> **Gate Check**: Before proceeding to v0.16.0, verify ALL prerequisites are functional.
+
+| Task | Priority | Description |
+|------|----------|-------------|
+| Comprehensive test suite | Critical | Exercise all self-hosting prerequisites |
+| Minimal lexer proof-of-concept | Critical | Tokenize "123 + 456" |
+| Gap analysis | Critical | Document any remaining blockers |
+| Go/No-Go decision | Critical | Formal gate for v0.16.0 |
+
+**Proof-of-Concept Lexer**:
+```bmb
+# tests/examples/minimal_lexer.bmb
+# Must successfully tokenize: "123 + abc"
+# Expected output: [Number(123), Plus, Ident("abc"), Eof]
+
+@node tokenize_simple
+@params source:Str
+@returns Vector<Token>
+  call %tokens vector_token_new
+  mov %pos 0
+  mov %len string_len(source)
+
+  _main_loop:
+    ge %done %pos %len
+    jif %done _return _process
+
+  _process:
+    call %c string_byte_at source %pos
+
+    # Skip whitespace
+    call %ws is_whitespace %c
+    jif %ws _skip_ws _check_digit
+
+  _skip_ws:
+    add %pos %pos 1
+    jmp _main_loop
+
+  _check_digit:
+    call %is_d is_digit %c
+    jif %is_d _read_number _check_alpha
+
+  _read_number:
+    # ... read full number, push Token::Number
+    jmp _main_loop
+
+  _check_alpha:
+    call %is_a is_alpha %c
+    jif %is_a _read_ident _check_plus
+
+  _read_ident:
+    # ... read identifier, push Token::Ident
+    jmp _main_loop
+
+  _check_plus:
+    eq %is_plus %c 43    # '+'
+    jif %is_plus _push_plus _error
+
+  _push_plus:
+    call _ vector_token_push %tokens Token::Plus
+    add %pos %pos 1
+    jmp _main_loop
+
+  _error:
+    call _ vector_token_push %tokens Token::Error
+    add %pos %pos 1
+    jmp _main_loop
+
+  _return:
+    call _ vector_token_push %tokens Token::Eof
+    ret %tokens
+```
+
+**Gate Criteria for v0.16.0**:
+- [ ] Vector<Token> operations work (new, push, get, len)
+- [ ] String operations work (byte_at, len, slice)
+- [ ] Character classification works (is_digit, is_alpha, is_whitespace)
+- [ ] Enum with data construction works
+- [ ] Pattern matching extracts enum data
+- [ ] Multi-file compilation works
+- [ ] Minimal lexer tokenizes "123 + abc" correctly
+
+**Success Criteria**:
+- All gate criteria checked ✅
+- Minimal lexer proof-of-concept passes
+- No critical blockers identified
+- Green light for v0.16.0
+
 ---
 
 ## v0.16.0: Lexer & Tokenizer in BMB
 
 **Goal**: First compiler component written in BMB (Ghuloum Phase 1)
+
+> **Prerequisite**: v0.15.8 gate criteria must pass
 
 | Task | Priority | Complexity |
 |------|----------|------------|
@@ -1957,6 +2250,7 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 15.4 | 2025-12-24 | **Difficulty Calibration**: Added v0.15.4-v0.15.8 intermediate milestones between Implementation Hardening and Self-Hosting. New phases: (1) v0.15.4 Collection Operations via Host Functions, (2) v0.15.5 Character Classification & Enum Data, (3) v0.15.6 String Processing, (4) v0.15.7 Multi-File WASM Compilation, (5) v0.15.8 Self-Hosting Readiness Gate. Each milestone has clear success criteria and integration tests. Addresses gap analysis showing ~40% of documented features lack codegen. |
 | 15.1 | 2025-12-24 | **Major Roadmap Restructure**: Added 4 new phase groups addressing identified gaps. (1) v0.15.1-v0.15.3 Implementation Hardening - verify documented features work. (2) v0.21.1-v0.21.3 Rust Interoperability - C ABI, Rust type mapping, Cargo integration. (3) v0.27.1-v0.27.3 Tool Ecosystem Maturation - package manager, IDE/LSP, debugging. (4) Benchmark Suite parallel track from v0.22+. Added "Positioning Philosophy" section. Updated Risk Register with 5 new risks. |
 | 15.0 | 2025-12-24 | v0.15.0 Complete: Exhaustiveness checking for pattern matching (Maranget-style usefulness algorithm), integration tests for non-exhaustive patterns, example BMB programs for @match. String operations deferred to v0.15.1. |
 | 14.0 | 2025-12-24 | v0.14.0 Complete: Contract Inference system with frame analysis (@modifies) and postcondition suggestions. Boilerplate reduction through intelligent inference. |
