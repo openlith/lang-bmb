@@ -598,6 +598,273 @@ _return_eq:
 _return_colon:
   ret %colon_result
 
+# ============================================
+# Identifier and Keyword Scanning
+# ============================================
+
+# scan_identifier_length: Count characters in identifier starting at pos
+# Returns the length of the identifier (0 if not an identifier start)
+@node scan_identifier_length
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= 0
+  call %ch peek source pos
+  lt %is_eof %ch 0
+  jif %is_eof _zero
+  call %is_start is_ident_start %ch
+  eq %not_start %is_start 0
+  jif %not_start _zero
+  # Count continuing characters
+  add %next_pos pos 1
+  call %rest_len scan_ident_continue_length source %next_pos
+  add %total rest_len 1
+  ret %total
+_zero:
+  mov %result 0
+  ret %result
+
+# scan_ident_continue_length: Count continuing identifier characters
+@node scan_ident_continue_length
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= 0
+  call %ch peek source pos
+  lt %is_eof %ch 0
+  jif %is_eof _zero
+  call %is_cont is_ident_continue %ch
+  eq %not_cont %is_cont 0
+  jif %not_cont _zero
+  add %next_pos pos 1
+  call %rest_len scan_ident_continue_length source %next_pos
+  add %total %rest_len 1
+  ret %total
+_zero:
+  mov %result 0
+  ret %result
+
+# collect_identifier: Collect identifier bytes into a new string handle
+# Returns string handle
+@node collect_identifier
+@params source:i32 start:i32 len:i32
+@returns i32
+@pre start >= 0
+@pre len > 0
+@post ret >= 0
+  xcall %handle string_new
+  mov %i 0
+  add %end start len
+_loop:
+  ge %done %i len
+  jif %done _done
+  add %src_pos start %i
+  xcall %byte string_get_byte source %src_pos
+  xcall %dummy string_push_byte %handle %byte
+  add %i %i 1
+  jmp _loop
+_done:
+  ret %handle
+
+# check_keyword_node: Check if identifier is "node" (after @)
+# Returns 1 if matches, 0 otherwise
+@node check_keyword_node
+@params source:i32 start:i32 len:i32
+@returns i32
+@pre start >= 0
+@post true
+  # "node" = 110, 111, 100, 101
+  ne %not_4 len 4
+  jif %not_4 _no
+  add %p0 start 0
+  xcall %c0 string_get_byte source %p0
+  ne %not_n %c0 110
+  jif %not_n _no
+  add %p1 start 1
+  xcall %c1 string_get_byte source %p1
+  ne %not_o %c1 111
+  jif %not_o _no
+  add %p2 start 2
+  xcall %c2 string_get_byte source %p2
+  ne %not_d %c2 100
+  jif %not_d _no
+  add %p3 start 3
+  xcall %c3 string_get_byte source %p3
+  ne %not_e %c3 101
+  jif %not_e _no
+  mov %result 1
+  ret %result
+_no:
+  mov %result 0
+  ret %result
+
+# check_keyword_params: Check if identifier is "params"
+@node check_keyword_params
+@params source:i32 start:i32 len:i32
+@returns i32
+@pre start >= 0
+@post true
+  # "params" = 112, 97, 114, 97, 109, 115
+  ne %not_6 len 6
+  jif %not_6 _no
+  add %p0 start 0
+  xcall %c0 string_get_byte source %p0
+  ne %not_p %c0 112
+  jif %not_p _no
+  add %p1 start 1
+  xcall %c1 string_get_byte source %p1
+  ne %not_a %c1 97
+  jif %not_a _no
+  add %p2 start 2
+  xcall %c2 string_get_byte source %p2
+  ne %not_r %c2 114
+  jif %not_r _no
+  add %p3 start 3
+  xcall %c3 string_get_byte source %p3
+  ne %not_a2 %c3 97
+  jif %not_a2 _no
+  add %p4 start 4
+  xcall %c4 string_get_byte source %p4
+  ne %not_m %c4 109
+  jif %not_m _no
+  add %p5 start 5
+  xcall %c5 string_get_byte source %p5
+  ne %not_s %c5 115
+  jif %not_s _no
+  mov %result 1
+  ret %result
+_no:
+  mov %result 0
+  ret %result
+
+# check_keyword_returns: Check if identifier is "returns"
+@node check_keyword_returns
+@params source:i32 start:i32 len:i32
+@returns i32
+@pre start >= 0
+@post true
+  # "returns" = 114, 101, 116, 117, 114, 110, 115
+  ne %not_7 len 7
+  jif %not_7 _no
+  add %p0 start 0
+  xcall %c0 string_get_byte source %p0
+  ne %not_r %c0 114
+  jif %not_r _no
+  add %p1 start 1
+  xcall %c1 string_get_byte source %p1
+  ne %not_e %c1 101
+  jif %not_e _no
+  add %p2 start 2
+  xcall %c2 string_get_byte source %p2
+  ne %not_t %c2 116
+  jif %not_t _no
+  add %p3 start 3
+  xcall %c3 string_get_byte source %p3
+  ne %not_u %c3 117
+  jif %not_u _no
+  add %p4 start 4
+  xcall %c4 string_get_byte source %p4
+  ne %not_r2 %c4 114
+  jif %not_r2 _no
+  add %p5 start 5
+  xcall %c5 string_get_byte source %p5
+  ne %not_n %c5 110
+  jif %not_n _no
+  add %p6 start 6
+  xcall %c6 string_get_byte source %p6
+  ne %not_s %c6 115
+  jif %not_s _no
+  mov %result 1
+  ret %result
+_no:
+  mov %result 0
+  ret %result
+
+# scan_identifier_or_keyword: Scan identifier and check for keywords
+# Returns packed (kind << 16) | new_pos
+# Ident = 74, Register = 75, Label = 76
+# KwNode = 0, KwParams = 1, KwReturns = 2
+@node scan_identifier_or_keyword
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %len scan_identifier_length source pos
+  eq %no_ident %len 0
+  jif %no_ident _not_matched
+  # Collect the identifier string
+  call %handle collect_identifier source pos %len
+  add %new_pos pos %len
+  # Check for keywords (only after @)
+  # For now, just return as Ident
+  mul %kind 74 65536
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_register: Scan register (%name)
+# Returns packed result or -1
+@node scan_register
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  ne %not_percent %ch 37
+  jif %not_percent _not_matched
+  # Must have identifier after %
+  add %id_start pos 1
+  call %len scan_identifier_length source %id_start
+  eq %no_name %len 0
+  jif %no_name _not_matched
+  # Collect register name
+  call %handle collect_identifier source %id_start %len
+  add %new_pos pos 1
+  add %new_pos %new_pos %len
+  # Register = 75
+  mul %kind 75 65536
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_label: Scan label (_name or _name:)
+# Returns packed result or -1
+@node scan_label
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  ne %not_underscore %ch 95
+  jif %not_underscore _not_matched
+  # Scan the label name (underscore + alphanumeric)
+  add %id_start pos 1
+  call %len scan_ident_continue_length source %id_start
+  add %total_len %len 1
+  # Collect label name
+  call %handle collect_identifier source pos %total_len
+  add %new_pos pos %total_len
+  # Check for trailing colon (label definition)
+  call %next_ch peek source %new_pos
+  eq %has_colon %next_ch 58
+  jif %has_colon _with_colon
+  # Label = 76
+  mul %kind 76 65536
+  add %result %kind %new_pos
+  ret %result
+_with_colon:
+  add %new_pos %new_pos 1
+  mul %kind 76 65536
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
 # scan_token: Main token scanning entry point
 # Returns packed result: (kind << 16) | new_pos, or (EOF << 16) | pos at end
 @node scan_token
@@ -620,7 +887,17 @@ _return_colon:
   ne %ws_bool %is_ws 0
   jif %ws_bool _skip_ws
 
-  # Try multi-char tokens first (::, =>, ==, !=, <=, >=)
+  # Try register (%name) - must check before % as single-char token
+  call %reg_result scan_register source pos
+  ge %reg_matched %reg_result 0
+  jif %reg_matched _return_reg
+
+  # Try label (_name)
+  call %label_result scan_label source pos
+  ge %label_matched %label_result 0
+  jif %label_matched _return_label
+
+  # Try multi-char tokens (::, =>, ==, !=, <=, >=)
   call %multi_result scan_multi_char source pos
   ge %multi_matched %multi_result 0
   jif %multi_matched _return_multi
@@ -630,8 +907,12 @@ _return_colon:
   ge %single_matched %single_result 0
   jif %single_matched _return_single
 
-  # Not a recognized token - will be handled by other phases
-  # For now, return Error token (80) and advance
+  # Try identifier
+  call %ident_result scan_identifier_or_keyword source pos
+  ge %ident_matched %ident_result 0
+  jif %ident_matched _return_ident
+
+  # Not a recognized token - return Error (80) and advance
   mul %err_kind 80 65536
   add %new_pos pos 1
   add %result %err_kind %new_pos
@@ -647,6 +928,15 @@ _newline:
   add %nl_pos pos 1
   add %result %nl_kind %nl_pos
   ret %result
+
+_return_ident:
+  ret %ident_result
+
+_return_label:
+  ret %label_result
+
+_return_reg:
+  ret %reg_result
 
 _return_multi:
   ret %multi_result
