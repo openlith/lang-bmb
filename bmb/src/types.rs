@@ -42,9 +42,19 @@ impl TypeRegistry {
         self.structs.get(name)
     }
 
+    /// Check if a struct with this name is registered
+    pub fn has_struct(&self, name: &str) -> bool {
+        self.structs.contains_key(name)
+    }
+
     /// Get an enum definition by name
     pub fn get_enum(&self, name: &str) -> Option<&EnumDef> {
         self.enums.get(name)
+    }
+
+    /// Check if an enum with this name is registered
+    pub fn has_enum(&self, name: &str) -> bool {
+        self.enums.contains_key(name)
     }
 
     /// Check if a type name is defined (struct, enum, or refined type)
@@ -72,6 +82,11 @@ impl TypeRegistry {
     /// Get a refined type definition by name
     pub fn get_refined_type(&self, name: &str) -> Option<&TypeDef> {
         self.refined_types.get(name)
+    }
+
+    /// Check if a refined type with this name is registered
+    pub fn has_refined_type(&self, name: &str) -> bool {
+        self.refined_types.contains_key(name)
     }
 
     /// Resolve a refined type to its base type
@@ -448,6 +463,129 @@ pub fn typecheck_merged(merged: &crate::modules::MergedProgram) -> Result<TypedP
         enums: merged.main.enums.clone(),
         type_defs: merged.main.type_defs.clone(),
         contracts: merged.main.contracts.clone(),
+        nodes: typed_nodes,
+        registry,
+    })
+}
+
+/// Perform full type checking on a merged program, including all module nodes
+///
+/// Unlike `typecheck_merged`, this includes typed nodes from all modules
+/// with qualified names (module::function), producing a single TypedProgram
+/// suitable for multi-file WASM compilation.
+pub fn typecheck_merged_full(merged: &crate::modules::MergedProgram) -> Result<TypedProgram> {
+    let mut typed_nodes = Vec::new();
+    let mut global_env = TypeEnv::new();
+    let mut registry = TypeRegistry::new();
+
+    // Collect all imports and extern defs
+    let all_imports = merged.main.imports.clone();
+    let mut all_extern_defs = merged.main.extern_defs.clone();
+    let mut all_structs = merged.main.structs.clone();
+    let mut all_enums = merged.main.enums.clone();
+    let mut all_type_defs = merged.main.type_defs.clone();
+    let all_contracts = merged.main.contracts.clone();
+
+    // Phase 0a: Build type registry from main program definitions
+    for struct_def in &merged.main.structs {
+        registry.add_struct(struct_def.clone());
+    }
+    for enum_def in &merged.main.enums {
+        registry.add_enum(enum_def.clone());
+    }
+    for type_def in &merged.main.type_defs {
+        registry.add_refined_type(type_def.clone());
+    }
+
+    // Phase 0b: Build type registry from module definitions
+    for (_module_name, resolved) in &merged.modules {
+        for struct_def in &resolved.program.structs {
+            if !registry.has_struct(&struct_def.name.name) {
+                registry.add_struct(struct_def.clone());
+                all_structs.push(struct_def.clone());
+            }
+        }
+        for enum_def in &resolved.program.enums {
+            if !registry.has_enum(&enum_def.name.name) {
+                registry.add_enum(enum_def.clone());
+                all_enums.push(enum_def.clone());
+            }
+        }
+        for type_def in &resolved.program.type_defs {
+            if !registry.has_refined_type(&type_def.name.name) {
+                registry.add_refined_type(type_def.clone());
+                all_type_defs.push(type_def.clone());
+            }
+        }
+        // Collect extern defs from modules
+        for extern_def in &resolved.program.extern_defs {
+            all_extern_defs.push(extern_def.clone());
+        }
+    }
+
+    // Phase 1a: Register module functions with qualified names
+    for (module_name, resolved) in &merged.modules {
+        for node in &resolved.program.nodes {
+            let qualified_name = format!("{}::{}", module_name, node.name.name);
+            let sig = FunctionSig {
+                params: node.params.iter().map(|p| p.ty.clone()).collect(),
+                returns: node.returns.clone(),
+            };
+            global_env.add_function(&qualified_name, sig);
+        }
+    }
+
+    // Phase 1b: Register extern function signatures
+    for extern_def in &all_extern_defs {
+        for param in &extern_def.params {
+            validate_type(&param.ty, &registry)?;
+        }
+        validate_type(&extern_def.returns, &registry)?;
+
+        let sig = FunctionSig {
+            params: extern_def.params.iter().map(|p| p.ty.clone()).collect(),
+            returns: extern_def.returns.clone(),
+        };
+        global_env.add_function(&extern_def.name.name, sig);
+    }
+
+    // Phase 2: Register main program functions
+    for node in &merged.main.nodes {
+        let sig = FunctionSig {
+            params: node.params.iter().map(|p| p.ty.clone()).collect(),
+            returns: node.returns.clone(),
+        };
+        global_env.add_function(&node.name.name, sig);
+    }
+
+    // Phase 3a: Type check module nodes (with qualified names)
+    for (module_name, resolved) in &merged.modules {
+        for node in &resolved.program.nodes {
+            // Create a copy of the node with qualified name
+            let mut qualified_node = node.clone();
+            qualified_node.name = crate::ast::Identifier {
+                name: format!("{}::{}", module_name, node.name.name),
+                span: node.name.span,
+            };
+
+            let typed_node = typecheck_node(&qualified_node, &global_env, &registry)?;
+            typed_nodes.push(typed_node);
+        }
+    }
+
+    // Phase 3b: Type check main program nodes
+    for node in &merged.main.nodes {
+        let typed_node = typecheck_node(node, &global_env, &registry)?;
+        typed_nodes.push(typed_node);
+    }
+
+    Ok(TypedProgram {
+        imports: all_imports,
+        extern_defs: all_extern_defs,
+        structs: all_structs,
+        enums: all_enums,
+        type_defs: all_type_defs,
+        contracts: all_contracts,
         nodes: typed_nodes,
         registry,
     })

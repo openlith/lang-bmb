@@ -186,6 +186,44 @@ pub fn compile_with_opt(
     Ok((wasm, VerificationLevel::Silver))
 }
 
+/// Compile a merged program (multiple BMB files) to WebAssembly
+///
+/// This compiles a pre-resolved MergedProgram containing a main program
+/// and its imported modules into a single WebAssembly binary. All module
+/// functions are included with qualified names (module::function).
+///
+/// # Arguments
+///
+/// * `merged` - The merged program with resolved modules
+///
+/// # Returns
+///
+/// A tuple of (wasm_binary, verification_level)
+pub fn compile_merged(merged: &MergedProgram) -> Result<(Vec<u8>, VerificationLevel)> {
+    compile_merged_with_opt(merged, optimize::OptLevel::Basic)
+}
+
+/// Compile a merged program with specified optimization level
+pub fn compile_merged_with_opt(
+    merged: &MergedProgram,
+    opt_level: optimize::OptLevel,
+) -> Result<(Vec<u8>, VerificationLevel)> {
+    // Phase 1: Type check (all modules together)
+    let typed_ast = types::typecheck_merged_full(merged)?;
+
+    // Phase 2: Contract check
+    let verified_ast = contracts::verify(&typed_ast)?;
+
+    // Phase 3: Optimize
+    let mut optimized_ast = verified_ast;
+    optimize::optimize(&mut optimized_ast, opt_level);
+
+    // Phase 4: Generate Wasm
+    let wasm = codegen::generate(&optimized_ast)?;
+
+    Ok((wasm, VerificationLevel::Silver))
+}
+
 /// Compile BMB source code to native x64 Linux ELF executable
 ///
 /// This compiles BMB code directly to x64 machine code and wraps it in

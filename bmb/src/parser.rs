@@ -2979,4 +2979,28 @@ _base:
             panic!("Expected Box type, got {:?}", program.nodes[0].returns);
         }
     }
+
+    #[test]
+    fn test_parse_multiple_nodes() {
+        let source = r#"
+@node adder
+@params a:i32 b:i32
+@returns i32
+  add %r a b
+  ret %r
+
+@node multiplier
+@params a:i32 b:i32
+@returns i32
+  mul %r a b
+  ret %r
+"#;
+        let result = parse(source);
+        assert!(result.is_ok(), "Failed to parse multiple nodes: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 2);
+        assert_eq!(program.nodes[0].name.name, "adder");
+        assert_eq!(program.nodes[1].name.name, "multiplier");
+    }
 }

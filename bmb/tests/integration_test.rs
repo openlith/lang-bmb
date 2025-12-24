@@ -4267,3 +4267,231 @@ fn test_stdlib_string_iteration() {
     let result = test_fn.call(&mut store, ()).expect("call failed");
     assert_eq!(result, 31, "'a1b' should have len=3, digit_count=1: 3*10+1=31");
 }
+
+// ============================================================================
+// v0.15.7: Multi-File WASM Compilation Tests
+// ============================================================================
+
+#[test]
+fn test_multi_file_basic() {
+    // Test basic multi-file compilation where main calls a module function
+    use bmb::modules::{MergedProgram, ResolvedModule};
+    use bmb::parser;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    // Module: math.bmb - provides an adder function
+    let math_source = r#"
+@node adder
+@params a:i32 b:i32
+@returns i32
+
+  add %r a b
+  ret %r
+"#;
+
+    // Main program - calls math::adder
+    let main_source = r#"
+@node calculate
+@params x:i32 y:i32
+@returns i32
+
+  call %result math::adder x y
+  ret %result
+"#;
+
+    // Parse both programs
+    let math_program = parser::parse(math_source).expect("failed to parse math module");
+    let main_program = parser::parse(main_source).expect("failed to parse main program");
+
+    // Create merged program
+    let mut modules = HashMap::new();
+    modules.insert(
+        "math".to_string(),
+        ResolvedModule {
+            path: PathBuf::from("math.bmb"),
+            program: math_program,
+            alias: None,
+        },
+    );
+    let merged = MergedProgram::new(main_program, modules);
+
+    // Compile merged program
+    let (wasm, _level) = bmb::compile_merged(&merged).expect("compilation failed");
+
+    // Execute
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    // The main function should be exported
+    let calculate = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "calculate")
+        .expect("calculate function not found");
+
+    // Test: 10 + 20 = 30
+    let result = calculate.call(&mut store, (10, 20)).expect("call failed");
+    assert_eq!(result, 30);
+
+    // Test: -5 + 15 = 10
+    let result = calculate.call(&mut store, (-5, 15)).expect("call failed");
+    assert_eq!(result, 10);
+}
+
+#[test]
+fn test_multi_file_multiple_functions() {
+    // Test multi-file compilation with multiple functions from a module
+    use bmb::modules::{MergedProgram, ResolvedModule};
+    use bmb::parser;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    // Module: math.bmb - provides multiple functions
+    let math_source = r#"
+@node adder
+@params a:i32 b:i32
+@returns i32
+  add %r a b
+  ret %r
+
+@node multiplier
+@params a:i32 b:i32
+@returns i32
+  mul %r a b
+  ret %r
+"#;
+
+    // Main program - calls both math functions
+    let main_source = r#"
+@node compute
+@params x:i32 y:i32
+@returns i32
+  # Compute: (x + y) * x
+  call %sum math::adder x y
+  call %result math::multiplier %sum x
+  ret %result
+"#;
+
+    // Parse both programs
+    let math_program = parser::parse(math_source).expect("failed to parse math module");
+    let main_program = parser::parse(main_source).expect("failed to parse main program");
+
+    // Create merged program
+    let mut modules = HashMap::new();
+    modules.insert(
+        "math".to_string(),
+        ResolvedModule {
+            path: PathBuf::from("math.bmb"),
+            program: math_program,
+            alias: None,
+        },
+    );
+    let merged = MergedProgram::new(main_program, modules);
+
+    // Compile merged program
+    let (wasm, _level) = bmb::compile_merged(&merged).expect("compilation failed");
+
+    // Execute
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let compute = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "compute")
+        .expect("compute function not found");
+
+    // Test: (3 + 5) * 3 = 24
+    let result = compute.call(&mut store, (3, 5)).expect("call failed");
+    assert_eq!(result, 24);
+
+    // Test: (10 + 2) * 10 = 120
+    let result = compute.call(&mut store, (10, 2)).expect("call failed");
+    assert_eq!(result, 120);
+}
+
+#[test]
+fn test_multi_file_two_modules() {
+    // Test multi-file compilation with two different modules
+    use bmb::modules::{MergedProgram, ResolvedModule};
+    use bmb::parser;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    // Module: arith.bmb
+    let arith_source = r#"
+@node double
+@params n:i32
+@returns i32
+  mul %r n 2
+  ret %r
+"#;
+
+    // Module: logic.bmb
+    let logic_source = r#"
+@node increment
+@params n:i32
+@returns i32
+  add %r n 1
+  ret %r
+"#;
+
+    // Main program - calls both modules
+    let main_source = r#"
+@node process
+@params x:i32
+@returns i32
+  # double(x) + increment(x) = 2x + (x+1) = 3x + 1
+  call %doubled arith::double x
+  call %incremented logic::increment x
+  add %result %doubled %incremented
+  ret %result
+"#;
+
+    // Parse all programs
+    let arith_program = parser::parse(arith_source).expect("failed to parse arith module");
+    let logic_program = parser::parse(logic_source).expect("failed to parse logic module");
+    let main_program = parser::parse(main_source).expect("failed to parse main program");
+
+    // Create merged program with two modules
+    let mut modules = HashMap::new();
+    modules.insert(
+        "arith".to_string(),
+        ResolvedModule {
+            path: PathBuf::from("arith.bmb"),
+            program: arith_program,
+            alias: None,
+        },
+    );
+    modules.insert(
+        "logic".to_string(),
+        ResolvedModule {
+            path: PathBuf::from("logic.bmb"),
+            program: logic_program,
+            alias: None,
+        },
+    );
+    let merged = MergedProgram::new(main_program, modules);
+
+    // Compile merged program
+    let (wasm, _level) = bmb::compile_merged(&merged).expect("compilation failed");
+
+    // Execute
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let process = instance
+        .get_typed_func::<i32, i32>(&mut store, "process")
+        .expect("process function not found");
+
+    // Test: 3*5 + 1 = 16
+    let result = process.call(&mut store, 5).expect("call failed");
+    assert_eq!(result, 16);
+
+    // Test: 3*10 + 1 = 31
+    let result = process.call(&mut store, 10).expect("call failed");
+    assert_eq!(result, 31);
+}
