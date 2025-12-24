@@ -16,11 +16,22 @@ This roadmap follows BMB's core principle: **no shortcuts, no guessing**. Each v
 
 ```
 v0.6-v0.15: Foundation (Self-Hosting)
-v0.16-v0.18: Bronze Stage (Language Features)
+v0.16-v0.18: Bronze Stage (Generics & Language Features)
 v0.19-v0.21: Silver Stage (LLVM Integration)
 v0.22-v0.24: Gold Stage (Optimization)
 v1.0.0: Performance Transcendence Complete 🎯
 ```
+
+### Generics Philosophy: Contract-Propagating Monomorphic Generics
+
+> **Problem**: Without generics, BMB requires repetitive code for each type (Vector<i32>, Vector<f64>, etc.)
+> This repetition reduces signal density and hides the essential pattern.
+>
+> **Solution**: Monomorphic generics with contract propagation
+> - **One definition** → N type-specific instantiations (pattern preserved)
+> - **Contracts propagate** automatically to each instantiation
+> - **Zero runtime cost** via monomorphization
+> - **Declaration-time checking** prevents "surprise" errors at instantiation
 
 ---
 
@@ -724,11 +735,58 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 
 ---
 
-## Bronze Stage (v0.16 - v0.18): Language Foundation
+## Bronze Stage (v0.16 - v0.18): Language Foundation & Generics
 
-**Goal**: Complete language features enabling advanced optimization
+**Goal**: Complete language features enabling advanced optimization, including **Contract-Propagating Monomorphic Generics** to eliminate boilerplate while preserving verifiability.
 
-### v0.16.0: Region-Based Memory
+> **Design Philosophy**: "Contract-Propagating Monomorphic Generics"
+> - **Monomorphization**: Zero runtime cost (like Rust/C++, unlike Java erasure)
+> - **Contract Propagation**: Generic contracts automatically apply to instantiated types
+> - **Declaration-time Checking**: Type errors caught at generic definition, not instantiation (unlike Zig)
+> - **Explicit Bounds**: No implicit interface satisfaction (unlike Go)
+
+### v0.16.0: Parametric Data Types & Region Memory
+
+**Goal**: Type parameters for structs/enums + memory region foundations
+
+#### Parametric Data Types (Generics Foundation)
+
+| Task | Description | Research Basis |
+|------|-------------|----------------|
+| Type parameter syntax `[T]` | Struct/enum type parameters | ML parametric polymorphism |
+| Monomorphization | Generate specialized types | Rust/C++ model |
+| Generic struct definitions | `@struct Container[T]` | SPARK Ada generics |
+| Generic enum definitions | `@enum Result[T, E]` | ML algebraic types |
+| Current hardcoded → generic | Option, Result, Vector, Slice | Internal refactor |
+
+**Syntax Examples**:
+```bmb
+# Parametric struct - T is explicit type parameter
+@struct Container[T]
+  data: *T
+  len: u64
+  cap: u64
+  @constraint len <= cap    # Contract preserved across T
+
+# Parametric enum
+@enum Result[T, E]
+  Ok: T
+  Err: E
+
+# Instantiation - type parameter explicit (no inference)
+@node example
+@params
+@returns Container[i32]     # Explicit: Container specialized for i32
+  mov %c Container[i32]::new
+  ret %c
+```
+
+**Philosophy Alignment**:
+- ✅ "Omission is guessing": Type parameter `[T]` is explicit
+- ✅ "Signal density": One definition → N instantiations (pattern, not repetition)
+- ✅ Verifiable: Contracts apply to each monomorphized instance
+
+#### Region-Based Memory
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -749,10 +807,57 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 ```
 
 **Success Criteria**:
+- Generic structs/enums with type parameters
+- Monomorphization produces specialized code
 - Region-scoped allocation verified at compile time
-- Stack allocation for non-escaping data
 
-### v0.17.0: Effect System
+### v0.17.0: Generic Functions & Effect System
+
+**Goal**: Type-parameterized functions with contract propagation
+
+#### Generic Functions
+
+| Task | Description | Research Basis |
+|------|-------------|----------------|
+| Function type parameters | `@node[T] func_name` | ML/Rust generics |
+| Contract propagation | Generic @pre/@post apply to T | SPARK Ada |
+| Type parameter inference | At call site (optional) | Hindley-Milner |
+| Multi-parameter generics | `@node[K, V] map_insert` | Standard parametricity |
+
+**Syntax Examples**:
+```bmb
+# Generic function - contracts are T-independent
+@node[T] container_get
+@params c:&Container[T] idx:u64
+@returns Option[&T]
+@pre idx < c.len              # ← Valid for any T
+@pre valid(c)                 # ← Valid for any T
+@post ret.is_some => idx < c.len
+  lt %in_bounds idx c.len
+  jif %in_bounds _valid _none
+_valid:
+  # ... return Some(&c.data[idx])
+_none:
+  ret Option[&T]::None
+
+# Usage - T inferred from arguments
+@node example
+@params v:&Container[i32]
+@returns Option[&i32]
+  call %r container_get v 0   # T = i32 inferred
+  ret %r
+```
+
+**Contract Propagation Rules**:
+```
+Generic Contract          │ Instantiated Contract
+─────────────────────────│──────────────────────────
+@pre idx < c.len          │ @pre idx < c.len (unchanged)
+@pre valid(c)             │ @pre valid(c:Container[i32])
+@post ret.is_some         │ @post ret.is_some (unchanged)
+```
+
+#### Effect System
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -778,10 +883,56 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
 ```
 
 **Success Criteria**:
+- Generic functions with contract propagation
 - Effect system integrates with contract verification
 - @pure functions provably side-effect free
 
-### v0.18.0: Liquid Types
+### v0.18.0: Bounded Generics & Liquid Types
+
+**Goal**: Contract-based type bounds + refinement types
+
+#### Bounded Generics (Contract-Based Bounds)
+
+| Task | Description | Research Basis |
+|------|-------------|----------------|
+| `where T satisfies` clause | Contract-based bounds | SPARK Ada formal generics |
+| Named contract as bound | `where T satisfies @contract Comparable` | Design by Contract |
+| Built-in bounds | `Sized`, `Copy`, `Default` | Rust-style but simpler |
+| Structural bounds | `where T has .len:u64` | Go-style explicit |
+
+**Syntax Examples**:
+```bmb
+# Contract as bound - explicit requirement
+@contract Comparable(a:T, b:T)
+@post ret == -1 || ret == 0 || ret == 1
+
+@node[T] binary_search
+@params arr:&[T] target:T
+@returns Option[u64]
+@where T satisfies @contract Comparable  # ← Explicit bound
+@pre sorted(arr)                         # ← Requires Comparable
+@post ret.is_some => arr[ret.unwrap] == target
+  # ... implementation using compare(a, b)
+
+# Built-in bounds
+@node[T] swap
+@params a:&T b:&T
+@returns void
+@where T: Sized                          # ← Must know size at compile time
+@pre valid(a) && valid(b)
+@post *a == old(*b) && *b == old(*a)
+  # ... implementation
+```
+
+**What We Avoid (and Why)**:
+| Pattern | Problem | BMB Alternative |
+|---------|---------|-----------------|
+| Type Erasure | Runtime type loss = Omission | Monomorphization |
+| Implicit Interface (Go) | Accidental satisfaction = Guessing | Explicit `satisfies` |
+| Virtual Dispatch | Unknown callee = Guessing | Static dispatch only |
+| Deep Inheritance | Hidden state = Omission | Composition |
+
+#### Liquid Types
 
 | Task | Description | Research Basis |
 |------|-------------|----------------|
@@ -804,9 +955,24 @@ Verification: Stage 2 binary == Stage 3 binary (fixed point)
   ret %val
 ```
 
+**Generics + Liquid Types Integration**:
+```bmb
+# Combine parametric polymorphism with refinement types
+@node[T] checked_get
+@params arr:&[T; N] idx:u64{idx < N}
+@returns &T
+@pure
+  # Bounds check eliminated - idx < N proven at type level
+  # Works for any T - monomorphized per type
+  load %val arr idx
+  ret %val
+```
+
 **Success Criteria**:
+- Contract-based type bounds (`where T satisfies`)
 - Refinement types integrate with @pre/@post
 - Automatic bounds check elimination for proven cases
+- Generics + Liquid Types work together seamlessly
 
 ---
 
@@ -1034,6 +1200,8 @@ Example: Array access
 
 | Technique | Source | BMB Integration | Expected Gain |
 |-----------|--------|-----------------|---------------|
+| Monomorphic generics | Rust, C++, SPARK Ada | `@struct[T]`, `@node[T]` | Code reuse, zero runtime cost |
+| Contract-based bounds | SPARK Ada | `where T satisfies @contract` | Type-safe polymorphism |
 | Region memory | Cyclone, MLKit | @region, escape analysis | 10-20% allocation |
 | Liquid types | LiquidHaskell | Type refinements | 15-30% bounds checks |
 | PGO | LLVM | --pgo-gen/--pgo-use | 5-30% overall |
@@ -1074,6 +1242,8 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 12.1 | 2025-12-24 | Bronze Stage reorganized: Contract-Propagating Monomorphic Generics integrated (v0.16 Parametric Data Types, v0.17 Generic Functions, v0.18 Bounded Generics) |
+| 12.0 | 2025-12-24 | v0.12.0 Complete: @extern FFI with calling conventions, @pub visibility annotation, WASM import modules |
 | 11.0 | 2025-12-24 | v0.11.0 Complete: Diagnostics struct + JSON serialization, LSP-compatible errors, SMT counterexample visualization, invariant suggestion with SMT verification and CLI --suggest-invariants |
 | 10.0 | 2025-12-24 | v0.10.0 Complete: @consume/@device/@volatile annotations, Linear Type Checker, DeviceDef, hex address literals |
 | 9.0 | 2025-12-24 | v0.9.0 Complete: String/Str types with UTF-8 validity constraints |
