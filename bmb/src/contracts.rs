@@ -881,6 +881,7 @@ mod tests {
             params: vec![crate::ast::Parameter {
                 name: Identifier::new("x", Span::default()),
                 ty: AstType::I32,
+                annotation: crate::ast::ParamAnnotation::None,
                 span: Span::default(),
             }],
             returns: AstType::I32,

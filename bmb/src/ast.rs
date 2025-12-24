@@ -19,6 +19,8 @@ pub struct Program {
     pub enums: Vec<EnumDef>,
     /// Named contract definitions (@contract)
     pub contracts: Vec<ContractDef>,
+    /// Device memory region definitions (v0.10+) - MMIO regions
+    pub device_defs: Vec<DeviceDef>,
     pub nodes: Vec<Node>,
 }
 
@@ -41,6 +43,17 @@ pub struct ModuleUse {
     pub span: Span,
 }
 
+/// Device memory region definition (v0.10+)
+/// @device UART_BASE 0x40000000  - Memory-mapped I/O base address
+#[derive(Debug, Clone)]
+pub struct DeviceDef {
+    /// Device region name (e.g., UART_BASE)
+    pub name: Identifier,
+    /// Base address as integer literal
+    pub address: i64,
+    pub span: Span,
+}
+
 /// Module path variants
 #[derive(Debug, Clone)]
 pub enum ModulePath {
@@ -50,11 +63,14 @@ pub enum ModulePath {
     Name(Identifier),
 }
 
-/// A struct definition
+/// A struct definition (v0.10+: supports @volatile for MMIO)
 #[derive(Debug, Clone)]
 pub struct StructDef {
     pub name: Identifier,
     pub fields: Vec<StructField>,
+    /// Whether this struct has volatile semantics (v0.10+)
+    /// Used for memory-mapped hardware registers
+    pub is_volatile: bool,
     pub span: Span,
 }
 
@@ -209,11 +225,37 @@ pub enum TestArg {
     Call { func: Identifier, args: Vec<TestArg> },
 }
 
+/// Parameter annotation for linear types and MMIO (v0.10+)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParamAnnotation {
+    /// No special annotation
+    #[default]
+    None,
+    /// @consume - Linear type: must be used exactly once
+    /// Prevents use-after-free and double-free by construction
+    Consume,
+    /// @device - MMIO pointer: volatile read/write semantics
+    /// Accesses cannot be reordered or optimized away
+    Device,
+}
+
+impl fmt::Display for ParamAnnotation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParamAnnotation::None => write!(f, ""),
+            ParamAnnotation::Consume => write!(f, "@consume"),
+            ParamAnnotation::Device => write!(f, "@device"),
+        }
+    }
+}
+
 /// A function parameter
 #[derive(Debug, Clone)]
 pub struct Parameter {
     pub name: Identifier,
     pub ty: Type,
+    /// Parameter annotation (v0.10+): @consume for linear types, @device for MMIO
+    pub annotation: ParamAnnotation,
     pub span: Span,
 }
 

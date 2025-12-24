@@ -41,6 +41,7 @@ pub fn parse(source: &str) -> Result<Program> {
     let mut structs = Vec::new();
     let mut enums = Vec::new();
     let mut contracts = Vec::new();
+    let mut device_defs = Vec::new();
     let mut nodes = Vec::new();
 
     // Get the program pair and iterate over its inner pairs
@@ -68,6 +69,9 @@ pub fn parse(source: &str) -> Result<Program> {
                 Rule::contract_def => {
                     contracts.push(parse_contract_def(pair)?);
                 }
+                Rule::device_def => {
+                    device_defs.push(parse_device_def(pair)?);
+                }
                 Rule::node => {
                     nodes.push(parse_node(pair)?);
                 }
@@ -85,6 +89,7 @@ pub fn parse(source: &str) -> Result<Program> {
         structs,
         enums,
         contracts,
+        device_defs,
         nodes,
     })
 }
@@ -158,28 +163,64 @@ fn parse_use_module(pair: pest::iterators::Pair<Rule>) -> Result<ModuleUse> {
     Ok(ModuleUse { path, alias, span })
 }
 
+/// Parse device definition: @device UART_BASE 0x40000000
+fn parse_device_def(pair: pest::iterators::Pair<Rule>) -> Result<DeviceDef> {
+    let span = pair_to_span(&pair);
+    let mut inner = pair.into_inner();
+
+    let name = parse_identifier(inner.next().unwrap())?;
+    let address_pair = inner.next().unwrap();
+    let address_str = address_pair.as_str();
+
+    // Parse address literal (supports 0x hex and decimal)
+    let address = if address_str.starts_with("0x") || address_str.starts_with("0X") {
+        let err_span = pair_to_span(&address_pair);
+        i64::from_str_radix(&address_str[2..], 16).map_err(|_| BmbError::ParseError {
+            line: err_span.line,
+            column: err_span.column,
+            message: format!("Invalid hex address: {}", address_str),
+        })?
+    } else {
+        let err_span = pair_to_span(&address_pair);
+        address_str.parse::<i64>().map_err(|_| BmbError::ParseError {
+            line: err_span.line,
+            column: err_span.column,
+            message: format!("Invalid address: {}", address_str),
+        })?
+    };
+
+    Ok(DeviceDef { name, address, span })
+}
+
 fn parse_struct_def(pair: pest::iterators::Pair<Rule>) -> Result<StructDef> {
     let span = pair_to_span(&pair);
     let mut inner = pair.into_inner();
 
     let name = parse_identifier(inner.next().unwrap())?;
     let mut fields = Vec::new();
+    let mut is_volatile = false;
 
     for field_pair in inner {
-        if field_pair.as_rule() == Rule::struct_field {
-            let field_span = pair_to_span(&field_pair);
-            let mut field_inner = field_pair.into_inner();
-            let field_name = parse_identifier(field_inner.next().unwrap())?;
-            let field_type = parse_type(field_inner.next().unwrap())?;
-            fields.push(StructField {
-                name: field_name,
-                ty: field_type,
-                span: field_span,
-            });
+        match field_pair.as_rule() {
+            Rule::struct_volatile => {
+                is_volatile = true;
+            }
+            Rule::struct_field => {
+                let field_span = pair_to_span(&field_pair);
+                let mut field_inner = field_pair.into_inner();
+                let field_name = parse_identifier(field_inner.next().unwrap())?;
+                let field_type = parse_type(field_inner.next().unwrap())?;
+                fields.push(StructField {
+                    name: field_name,
+                    ty: field_type,
+                    span: field_span,
+                });
+            }
+            _ => {}
         }
     }
 
-    Ok(StructDef { name, fields, span })
+    Ok(StructDef { name, fields, is_volatile, span })
 }
 
 fn parse_enum_def(pair: pest::iterators::Pair<Rule>) -> Result<EnumDef> {
@@ -290,6 +331,7 @@ fn parse_contract_def(pair: pest::iterators::Pair<Rule>) -> Result<ContractDef> 
                         params.push(Parameter {
                             name: param_name,
                             ty: param_type,
+                            annotation: ParamAnnotation::None,
                             span: param_span,
                         });
                     }
@@ -571,7 +613,23 @@ fn parse_params(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Parameter>> {
             let mut inner = param_pair.into_inner();
             let name = parse_identifier(inner.next().unwrap())?;
             let ty = parse_type(inner.next().unwrap())?;
-            params.push(Parameter { name, ty, span });
+
+            // Check for param_annotation (@consume or @device)
+            let annotation = if let Some(ann_pair) = inner.next() {
+                if ann_pair.as_rule() == Rule::param_annotation {
+                    match ann_pair.as_str() {
+                        "@consume" => ParamAnnotation::Consume,
+                        "@device" => ParamAnnotation::Device,
+                        _ => ParamAnnotation::None,
+                    }
+                } else {
+                    ParamAnnotation::None
+                }
+            } else {
+                ParamAnnotation::None
+            };
+
+            params.push(Parameter { name, ty, annotation, span });
         }
     }
 
@@ -2285,5 +2343,144 @@ _base:
             "Expected String return type, got {:?}",
             ret_type
         );
+    }
+
+    // ===== v0.10.0 Tests: Low-Level Safety =====
+
+    #[test]
+    fn test_parse_device_def() {
+        let src = "@device UART_BASE 0x40000000";
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse device def: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.device_defs.len(), 1);
+        assert_eq!(program.device_defs[0].name.name, "UART_BASE");
+        assert_eq!(program.device_defs[0].address, 0x40000000);
+    }
+
+    #[test]
+    fn test_parse_device_def_decimal() {
+        let src = "@device GPIO_BASE 1073741824";
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse device def: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.device_defs.len(), 1);
+        assert_eq!(program.device_defs[0].name.name, "GPIO_BASE");
+        assert_eq!(program.device_defs[0].address, 1073741824);
+    }
+
+    #[test]
+    fn test_parse_volatile_struct() {
+        let src = r#"
+@struct UartRegs @volatile
+  data:u8
+  status:u8
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse volatile struct: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.structs.len(), 1);
+        assert_eq!(program.structs[0].name.name, "UartRegs");
+        assert!(program.structs[0].is_volatile, "Expected is_volatile to be true");
+        assert_eq!(program.structs[0].fields.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_non_volatile_struct() {
+        let src = r#"
+@struct Point
+  x:f64
+  y:f64
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse struct: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.structs.len(), 1);
+        assert!(!program.structs[0].is_volatile, "Expected is_volatile to be false");
+    }
+
+    #[test]
+    fn test_parse_param_consume_annotation() {
+        let src = r#"
+@node free_buffer
+@params buf:*u8 @consume
+@returns void
+  ret
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse @consume param: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        assert_eq!(program.nodes[0].params.len(), 1);
+        assert_eq!(program.nodes[0].params[0].annotation, ParamAnnotation::Consume);
+    }
+
+    #[test]
+    fn test_parse_param_device_annotation() {
+        let src = r#"
+@node read_uart
+@params uart:*u8 @device
+@returns u8
+  load %0 %uart
+  ret %0
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse @device param: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        assert_eq!(program.nodes[0].params.len(), 1);
+        assert_eq!(program.nodes[0].params[0].annotation, ParamAnnotation::Device);
+    }
+
+    #[test]
+    fn test_parse_param_no_annotation() {
+        let src = r#"
+@node normal_func
+@params x:i32 y:i32
+@returns i32
+  add %0 %x %y
+  ret %0
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse normal params: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+        assert_eq!(program.nodes[0].params.len(), 2);
+        assert_eq!(program.nodes[0].params[0].annotation, ParamAnnotation::None);
+        assert_eq!(program.nodes[0].params[1].annotation, ParamAnnotation::None);
+    }
+
+    #[test]
+    fn test_parse_combined_v010_features() {
+        // Test combining device_def, volatile struct, and param annotations
+        let src = r#"
+@device UART_BASE 0x40000000
+
+@struct UartRegs @volatile
+  data:u8
+  status:u8
+
+@node write_uart
+@params uart:*UartRegs @device data:u8
+@returns void
+  ret
+"#;
+        let result = parse(src);
+        assert!(result.is_ok(), "Failed to parse combined v0.10 features: {:?}", result.err());
+
+        let program = result.unwrap();
+        assert_eq!(program.device_defs.len(), 1);
+        assert_eq!(program.structs.len(), 1);
+        assert!(program.structs[0].is_volatile);
+        assert_eq!(program.nodes.len(), 1);
+        assert_eq!(program.nodes[0].params[0].annotation, ParamAnnotation::Device);
+        assert_eq!(program.nodes[0].params[1].annotation, ParamAnnotation::None);
     }
 }

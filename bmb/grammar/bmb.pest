@@ -1,8 +1,14 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.9
+// Version 0.10
 //
 // Changes in 0.8:
 //   - Added @type refined type definitions with constraints
+// Changes in 0.10:
+//   - Added @consume annotation for linear types (use exactly once)
+//   - Added @device annotation for MMIO pointers
+//   - Added @volatile annotation for hardware register structs
+//   - Added device_def for memory-mapped region declarations
+//
 // Changes in 0.9:
 //   - Added String (owned UTF-8) and Str (borrowed UTF-8 slice) types
 //   - UTF-8 validity guaranteed at type level ("Omission is guessing")
@@ -33,7 +39,7 @@ WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "#" ~ (!"\n" ~ ANY)* }
 
 // Program structure - includes module declaration, imports, types, contracts, data, and nodes
-program = { SOI ~ module_decl? ~ (import | use_module)* ~ (type_def | struct_def | enum_def | contract_def | data_def)* ~ node* ~ EOI }
+program = { SOI ~ module_decl? ~ (import | use_module)* ~ (type_def | struct_def | enum_def | contract_def | data_def | device_def)* ~ node* ~ EOI }
 
 // Refined type definition (v0.8+, Signal Density Optimization)
 // @type nz_i32 i32 where self != 0
@@ -66,6 +72,13 @@ data_def = {
 }
 byte_array = { "[" ~ int_literal ~ ("," ~ int_literal)* ~ "]" }
 
+// Device memory region definition (v0.10+)
+// @device UART_BASE 0x40000000  # Memory-mapped I/O base address
+// Used for MMIO regions in bare-metal programming
+device_def = {
+    "@device" ~ ident ~ address_literal
+}
+
 // Module declaration (for Index system - replaces documentation)
 // @module math.arithmetic  OR  @. math.arithmetic (compact)
 module_decl = {
@@ -82,13 +95,17 @@ use_module = {
 module_path = ${ "\"" ~ module_path_inner ~ "\"" }
 module_path_inner = @{ (!("\"") ~ ANY)+ }
 
-// Struct definition
+// Struct definition (v0.10+: supports @volatile for MMIO)
 // @struct Point
 //   x:f64
 //   y:f64
+// @struct UartRegs @volatile  # Hardware register struct
+//   data:u8
+//   status:u8
 struct_def = {
-    "@struct" ~ ident ~ struct_field+
+    "@struct" ~ ident ~ struct_volatile? ~ struct_field+
 }
+struct_volatile = { "@volatile" }
 struct_field = { ident ~ ":" ~ type_spec }
 
 // Enum definition
@@ -140,10 +157,13 @@ test_expr = { ident ~ "(" ~ test_args? ~ ")" }
 test_args = { test_arg ~ ("," ~ test_arg)* }
 test_arg = { float_literal | int_literal | bool_literal | ident ~ "(" ~ test_args? ~ ")" | ident }
 
-// Parameters
+// Parameters (v0.10+: supports @consume for linear types, @device for MMIO)
 // @params a:i32 b:i32  OR  @p a:i32 b:i32 (compact)
+// @params buf:*u8 @consume        # Linear type - must use exactly once
+// @params uart:*UartRegs @device  # Device pointer - MMIO semantics
 params = { ("@params" | "@p") ~ param* }
-param = { ident ~ ":" ~ type_name }
+param = { ident ~ ":" ~ type_name ~ param_annotation? }
+param_annotation = { "@consume" | "@device" }
 
 // Return type
 // @returns i32  OR  @r i32 (compact)
@@ -294,6 +314,9 @@ old_expr = { "old" ~ "(" ~ expr ~ ")" }
 
 // Literals
 float_literal = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+// Address literal supporting decimal and hexadecimal (for @device)
+address_literal = @{ "0x" ~ ASCII_HEX_DIGIT+ | "0X" ~ ASCII_HEX_DIGIT+ | "-"? ~ ASCII_DIGIT+ }
+
 int_literal = @{ "-"? ~ ASCII_DIGIT+ }
 bool_literal = { "true" | "false" }
 

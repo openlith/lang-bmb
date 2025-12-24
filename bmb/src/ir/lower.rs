@@ -461,7 +461,7 @@ impl IrLowerer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Identifier, Node, Parameter, Span, Type};
+    use crate::ast::{Identifier, Node, ParamAnnotation, Parameter, Span, Type};
     use crate::types::{TypeRegistry, TypedNode};
 
     fn make_typed_node(node: Node) -> TypedNode {
@@ -475,6 +475,7 @@ mod tests {
         Parameter {
             name: Identifier::new(name, Span::default()),
             ty,
+            annotation: ParamAnnotation::None,
             span: Span::default(),
         }
     }

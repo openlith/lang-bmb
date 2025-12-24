@@ -152,6 +152,10 @@ pub struct TypeEnv {
     functions: HashMap<String, FunctionSig>,
     /// Current function's return type (for postcondition 'ret' keyword)
     return_type: Option<Type>,
+    /// Linear type usage tracking (v0.10+): @consume params must be used exactly once
+    linear_params: HashMap<String, usize>,
+    /// Device params tracking (v0.10+): @device params for MMIO
+    device_params: std::collections::HashSet<String>,
 }
 
 /// Function signature for type checking calls
@@ -163,11 +167,54 @@ pub struct FunctionSig {
 
 impl TypeEnv {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            params: HashMap::new(),
+            registers: HashMap::new(),
+            functions: HashMap::new(),
+            return_type: None,
+            linear_params: HashMap::new(),
+            device_params: std::collections::HashSet::new(),
+        }
     }
 
     pub fn add_param(&mut self, name: &str, ty: Type) {
         self.params.insert(name.to_string(), ty);
+    }
+
+    /// Add a linear parameter (v0.10+): must be used exactly once
+    pub fn add_linear_param(&mut self, name: &str, ty: Type) {
+        self.params.insert(name.to_string(), ty);
+        self.linear_params.insert(name.to_string(), 0);
+    }
+
+    /// Add a device parameter (v0.10+): MMIO pointer with volatile semantics
+    pub fn add_device_param(&mut self, name: &str, ty: Type) {
+        self.params.insert(name.to_string(), ty);
+        self.device_params.insert(name.to_string());
+    }
+
+    /// Record usage of a parameter (for linear type checking)
+    pub fn use_param(&mut self, name: &str) {
+        if let Some(count) = self.linear_params.get_mut(name) {
+            *count += 1;
+        }
+    }
+
+    /// Verify all linear params were used exactly once
+    /// Returns Some((param_name, use_count)) if a param wasn't used exactly once
+    pub fn verify_linear_usage(&self) -> Option<(String, usize)> {
+        for (name, count) in &self.linear_params {
+            if *count != 1 {
+                return Some((name.clone(), *count));
+            }
+        }
+        None
+    }
+
+    /// Check if a param is a device parameter
+    #[allow(dead_code)]
+    pub fn is_device_param(&self, name: &str) -> bool {
+        self.device_params.contains(name)
     }
 
     pub fn add_register(&mut self, name: &str, ty: Type) {
@@ -481,9 +528,22 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) ->
         env.add_function(name, sig.clone());
     }
 
-    // Add parameters to environment
+    // Add parameters to environment based on their annotation (v0.10+)
     for param in &node.params {
-        env.add_param(&param.name.name, param.ty.clone());
+        match param.annotation {
+            ParamAnnotation::Consume => {
+                // Linear type: must be used exactly once
+                env.add_linear_param(&param.name.name, param.ty.clone());
+            }
+            ParamAnnotation::Device => {
+                // Device pointer: MMIO semantics
+                env.add_device_param(&param.name.name, param.ty.clone());
+            }
+            ParamAnnotation::None => {
+                // Regular parameter
+                env.add_param(&param.name.name, param.ty.clone());
+            }
+        }
     }
 
     // Store return type for contract checking
@@ -499,6 +559,23 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) ->
                 typecheck_statement(stmt, &mut env, &node.returns, registry)?;
             }
         }
+    }
+
+    // Verify linear type usage (v0.10+): @consume params must be used exactly once
+    if let Some((param_name, use_count)) = env.verify_linear_usage() {
+        return Err(BmbError::TypeError {
+            message: if use_count == 0 {
+                format!(
+                    "Linear type error: @consume parameter '{}' was never used (must be used exactly once)",
+                    param_name
+                )
+            } else {
+                format!(
+                    "Linear type error: @consume parameter '{}' was used {} times (must be used exactly once)",
+                    param_name, use_count
+                )
+            },
+        });
     }
 
     // Type check contracts (multiple preconditions and postconditions allowed)
@@ -526,12 +603,37 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) ->
     })
 }
 
+/// Track usage of operands for linear type checking (v0.10+)
+/// This must be called for each operand that accesses a parameter
+fn track_operand_usage(operand: &Operand, env: &mut TypeEnv) {
+    match operand {
+        Operand::Register(r) => {
+            // Registers starting with % that match parameter names
+            env.use_param(&r.name);
+        }
+        Operand::Identifier(id) => {
+            env.use_param(&id.name);
+        }
+        _ => {}
+    }
+}
+
+/// Track usage of all operands in a statement for linear type checking
+fn track_statement_usage(stmt: &Statement, env: &mut TypeEnv) {
+    for operand in &stmt.operands {
+        track_operand_usage(operand, env);
+    }
+}
+
 fn typecheck_statement(
     stmt: &Statement,
     env: &mut TypeEnv,
     return_type: &Type,
     registry: &TypeRegistry,
 ) -> Result<()> {
+    // Track linear type usage (v0.10+): @consume params
+    track_statement_usage(stmt, env);
+
     match stmt.opcode {
         Opcode::Add | Opcode::Sub | Opcode::Mul | Opcode::Div | Opcode::Mod => {
             // Arithmetic: %dest = op %a %b
@@ -1299,6 +1401,7 @@ _less:
                     span: Span::default(),
                 },
             ],
+            is_volatile: false,
             span: Span::default(),
         });
 
@@ -1595,5 +1698,192 @@ _less:
         // Nested: Option<Vector<i32>> is valid
         let nested_type = Type::Option(Box::new(Type::Vector(Box::new(Type::I32))));
         assert!(validate_type(&nested_type, &registry).is_ok());
+    }
+
+    // ===== v0.10.0 Tests: Linear Type Checking =====
+
+    #[test]
+    fn test_linear_type_used_once() {
+        // @consume param used exactly once: should pass
+        let node = Node {
+            name: Identifier::new("free_buffer", Span::default()),
+            tags: vec![],
+            params: vec![Parameter {
+                name: Identifier::new("buf", Span::default()),
+                ty: Type::Ptr(Box::new(Type::U8)),
+                annotation: ParamAnnotation::Consume,
+                span: Span::default(),
+            }],
+            returns: Type::Void,
+            preconditions: vec![],
+            postconditions: vec![],
+            invariants: vec![],
+            variants: vec![],
+            pure: false,
+            requires: vec![],
+            assertions: vec![],
+            tests: vec![],
+            body: vec![
+                Instruction::Statement(Statement {
+                    opcode: Opcode::Mov,
+                    operands: vec![
+                        Operand::Register(Identifier::new("0", Span::default())),
+                        Operand::Identifier(Identifier::new("buf", Span::default())),
+                    ],
+                    span: Span::default(),
+                }),
+            ],
+            span: Span::default(),
+        };
+
+        let env = TypeEnv::new();
+        let registry = TypeRegistry::new();
+        let result = typecheck_node(&node, &env, &registry);
+        assert!(result.is_ok(), "Linear param used once should pass: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_linear_type_never_used() {
+        // @consume param never used: should fail
+        let node = Node {
+            name: Identifier::new("unused_buffer", Span::default()),
+            tags: vec![],
+            params: vec![Parameter {
+                name: Identifier::new("buf", Span::default()),
+                ty: Type::Ptr(Box::new(Type::U8)),
+                annotation: ParamAnnotation::Consume,
+                span: Span::default(),
+            }, Parameter {
+                name: Identifier::new("x", Span::default()),
+                ty: Type::I32,
+                annotation: ParamAnnotation::None,
+                span: Span::default(),
+            }],
+            returns: Type::I32,
+            preconditions: vec![],
+            postconditions: vec![],
+            invariants: vec![],
+            variants: vec![],
+            pure: false,
+            requires: vec![],
+            assertions: vec![],
+            tests: vec![],
+            body: vec![
+                // Use x (non-linear) but not buf (linear)
+                Instruction::Statement(Statement {
+                    opcode: Opcode::Ret,
+                    operands: vec![
+                        Operand::Identifier(Identifier::new("x", Span::default())),
+                    ],
+                    span: Span::default(),
+                }),
+            ],
+            span: Span::default(),
+        };
+
+        let env = TypeEnv::new();
+        let registry = TypeRegistry::new();
+        let result = typecheck_node(&node, &env, &registry);
+        assert!(result.is_err(), "Linear param never used should fail");
+
+        let err_msg = format!("{:?}", result.err().unwrap());
+        assert!(err_msg.contains("never used"), "Error should mention 'never used': {}", err_msg);
+    }
+
+    #[test]
+    fn test_linear_type_used_twice() {
+        // @consume param used twice: should fail
+        let node = Node {
+            name: Identifier::new("double_use", Span::default()),
+            tags: vec![],
+            params: vec![Parameter {
+                name: Identifier::new("buf", Span::default()),
+                ty: Type::Ptr(Box::new(Type::U8)),
+                annotation: ParamAnnotation::Consume,
+                span: Span::default(),
+            }],
+            returns: Type::Void,
+            preconditions: vec![],
+            postconditions: vec![],
+            invariants: vec![],
+            variants: vec![],
+            pure: false,
+            requires: vec![],
+            assertions: vec![],
+            tests: vec![],
+            body: vec![
+                Instruction::Statement(Statement {
+                    opcode: Opcode::Mov,
+                    operands: vec![
+                        Operand::Register(Identifier::new("0", Span::default())),
+                        Operand::Identifier(Identifier::new("buf", Span::default())),
+                    ],
+                    span: Span::default(),
+                }),
+                Instruction::Statement(Statement {
+                    opcode: Opcode::Mov,
+                    operands: vec![
+                        Operand::Register(Identifier::new("1", Span::default())),
+                        Operand::Identifier(Identifier::new("buf", Span::default())),
+                    ],
+                    span: Span::default(),
+                }),
+            ],
+            span: Span::default(),
+        };
+
+        let env = TypeEnv::new();
+        let registry = TypeRegistry::new();
+        let result = typecheck_node(&node, &env, &registry);
+        assert!(result.is_err(), "Linear param used twice should fail");
+
+        let err_msg = format!("{:?}", result.err().unwrap());
+        assert!(err_msg.contains("2 times"), "Error should mention '2 times': {}", err_msg);
+    }
+
+    #[test]
+    fn test_regular_param_no_linear_check() {
+        // Regular param (no annotation) can be used any number of times
+        let node = Node {
+            name: Identifier::new("normal_func", Span::default()),
+            tags: vec![],
+            params: vec![Parameter {
+                name: Identifier::new("x", Span::default()),
+                ty: Type::I32,
+                annotation: ParamAnnotation::None,
+                span: Span::default(),
+            }],
+            returns: Type::I32,
+            preconditions: vec![],
+            postconditions: vec![],
+            invariants: vec![],
+            variants: vec![],
+            pure: false,
+            requires: vec![],
+            assertions: vec![],
+            tests: vec![],
+            body: vec![
+                Instruction::Statement(Statement {
+                    opcode: Opcode::Add,
+                    operands: vec![
+                        Operand::Register(Identifier::new("0", Span::default())),
+                        Operand::Identifier(Identifier::new("x", Span::default())),
+                        Operand::Identifier(Identifier::new("x", Span::default())),
+                    ],
+                    span: Span::default(),
+                }),
+                Instruction::Statement(Statement {
+                    opcode: Opcode::Ret,
+                    operands: vec![Operand::Register(Identifier::new("0", Span::default()))],
+                    span: Span::default(),
+                }),
+            ],
+            span: Span::default(),
+        };
+
+        let env = TypeEnv::new();
+        let registry = TypeRegistry::new();
+        let result = typecheck_node(&node, &env, &registry);
+        assert!(result.is_ok(), "Regular param can be used multiple times: {:?}", result.err());
     }
 }

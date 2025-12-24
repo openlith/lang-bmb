@@ -1301,8 +1301,8 @@ fn type_to_valtype(ty: &Type) -> ValType {
 mod tests {
     use super::*;
     use crate::ast::{
-        Identifier, Instruction as AstInstruction, Node, Opcode, Operand, Parameter, Span,
-        Statement, Type,
+        Identifier, Instruction as AstInstruction, Node, Opcode, Operand, ParamAnnotation,
+        Parameter, Span, Statement, Type,
     };
     use crate::contracts::VerifiedProgram;
     use crate::types::{TypedNode, TypedProgram};
@@ -1339,6 +1339,7 @@ mod tests {
         Parameter {
             name: Identifier::new(name, Span::default()),
             ty,
+            annotation: ParamAnnotation::None,
             span: Span::default(),
         }
     }

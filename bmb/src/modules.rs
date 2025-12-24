@@ -696,6 +696,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: crate::ast::Identifier::new("main", crate::ast::Span::default()),
                 tags: vec![],
@@ -724,6 +725,7 @@ mod tests {
                 structs: vec![],
                 enums: vec![],
                 contracts: vec![],
+                device_defs: vec![],
                 nodes: vec![crate::ast::Node {
                     name: crate::ast::Identifier::new("add", crate::ast::Span::default()),
                     tags: vec![],
@@ -800,6 +802,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: crate::ast::Identifier::new("caller", crate::ast::Span::default()),
                 tags: vec![],
@@ -854,6 +857,7 @@ mod tests {
                 structs: vec![],
                 enums: vec![],
                 contracts: vec![],
+                device_defs: vec![],
                 nodes: vec![crate::ast::Node {
                     name: crate::ast::Identifier::new("adder", crate::ast::Span::default()),
                     tags: vec![],
@@ -861,11 +865,13 @@ mod tests {
                         crate::ast::Parameter {
                             name: crate::ast::Identifier::new("a", crate::ast::Span::default()),
                             ty: crate::ast::Type::I32,
+                            annotation: crate::ast::ParamAnnotation::None,
                             span: crate::ast::Span::default(),
                         },
                         crate::ast::Parameter {
                             name: crate::ast::Identifier::new("b", crate::ast::Span::default()),
                             ty: crate::ast::Type::I32,
+                            annotation: crate::ast::ParamAnnotation::None,
                             span: crate::ast::Span::default(),
                         },
                     ],
@@ -923,6 +929,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("sum", crate::ast::Span::default()),
                 tags: vec![
@@ -978,6 +985,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("sum", crate::ast::Span::default()),
                 tags: vec![Identifier::new("pure", crate::ast::Span::default())],
@@ -1012,6 +1020,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("area", crate::ast::Span::default()),
                 tags: vec![Identifier::new("pure", crate::ast::Span::default())],
@@ -1046,6 +1055,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("read", crate::ast::Span::default()),
                 tags: vec![Identifier::new("io", crate::ast::Span::default())],
@@ -1092,6 +1102,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("sum", crate::ast::Span::default()),
                 tags: vec![
@@ -1126,6 +1137,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("read", crate::ast::Span::default()),
                 tags: vec![
@@ -1185,6 +1197,7 @@ mod tests {
             structs: vec![],
             enums: vec![],
             contracts: vec![],
+            device_defs: vec![],
             nodes: vec![crate::ast::Node {
                 name: Identifier::new("helper", crate::ast::Span::default()),
                 tags: vec![],
