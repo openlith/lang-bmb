@@ -2,6 +2,7 @@
 //!
 //! The AST represents the structure of BMB programs after parsing.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A complete BMB program consisting of imports, type definitions, contracts, and nodes
@@ -662,7 +663,7 @@ impl Identifier {
 }
 
 /// Source location span
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Span {
     pub start: usize,
     pub end: usize,

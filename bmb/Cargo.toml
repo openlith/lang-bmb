@@ -1,6 +1,6 @@
 [package]
 name = "bmb"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 rust-version = "1.75"
 description = "BMB (Bare-Metal-Banter) - A high-precision contract-first programming language targeting WebAssembly"
@@ -20,7 +20,8 @@ wasm-encoder = "0.220"
 # Error handling
 thiserror = "2.0"
 
-# JSON serialization (for grammar export)
+# JSON serialization (for grammar export and diagnostics)
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # CLI dependencies (optional)
@@ -37,7 +38,7 @@ rsmt2 = { version = "0.16", optional = true }
 tower-lsp = { version = "0.20", optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread", "io-std", "macros"], optional = true }
 async-trait = { version = "0.1", optional = true }
-serde = { version = "1.0", features = ["derive"], optional = true }
+# serde now in default deps
 dashmap = { version = "6.0", optional = true }
 
 [dev-dependencies]
@@ -57,7 +58,7 @@ required-features = ["cli"]
 default = []
 cli = ["dep:clap", "dep:colored", "dep:wasmtime", "dep:wasmprinter"]
 smt = ["dep:rsmt2"]
-lsp = ["dep:tower-lsp", "dep:tokio", "dep:async-trait", "dep:serde", "dep:dashmap"]
+lsp = ["dep:tower-lsp", "dep:tokio", "dep:async-trait", "dep:dashmap"]
 
 [[bin]]
 name = "bmb-lsp"

@@ -2,8 +2,8 @@
 
 > **"Omission is guessing, and guessing is error."**
 
-**Last Updated**: 2025-12-23
-**Current Version**: v0.8.0
+**Last Updated**: 2025-12-24
+**Current Version**: v0.11.0
 **Target**: v1.0.0 (Performance Transcendence)
 
 ---
@@ -24,7 +24,7 @@ v1.0.0: Performance Transcendence Complete 🎯
 
 ---
 
-## Current State (v0.7.0)
+## Current State (v0.10.0)
 
 ### Implemented Features
 
@@ -32,9 +32,13 @@ v1.0.0: Performance Transcendence Complete 🎯
 |----------|----------|
 | **Parser** | PEG grammar, pest parser, error reporting |
 | **Types** | i8-i64, u8-u64, f32, f64, bool, char, arrays, structs, enums, refs, pointers |
+| **Generics** | Option<T>, Result<T,E>, Vector<T>, Slice<T> |
+| **Refined Types** | `@type nz_i32 i32 where self != 0` |
+| **Strings** | String (owned), Str (view), UTF-8 validity |
 | **Contracts** | @pre, @post, @invariant, @requires, @pure, @contract, @assert, @variant, runtime & static verification |
+| **Linear Types** | @consume (use-once), @device (MMIO), @volatile (hardware regs) |
 | **Codegen** | WASM, x64 ELF64/PE64/Mach-O64, ARM64 ELF64 |
-| **Verification** | SMT (Z3/CVC4/CVC5), static contract proving (Gold level), purity checking |
+| **Verification** | SMT (Z3/CVC4/CVC5), static contract proving (Gold level), purity checking, linear type checking |
 | **DevEx** | LSP server, formatter, linter |
 | **Modules** | @use, @import, qualified calls, namespace |
 | **Optimization** | IR, constant folding, DCE, function inlining |
@@ -260,11 +264,24 @@ add %i_2 %i_1 1   # Clear: %i_2 depends on %i_1
 
 ---
 
-## v0.10.0: Low-Level Safety
+## v0.10.0: Low-Level Safety ✅ COMPLETE
 
 **Goal**: Comprehensive memory safety and hardware interaction for bare-metal systems
 
 **Philosophy**: BMB uses **contract-based pointer verification** rather than Rust-style ownership. This maintains "Omission is guessing" principle with explicit, verifiable contracts. As a "Bare-Metal" language, BMB must also support hardware interaction primitives.
+
+### Implemented Features (v0.10.0)
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| `@consume` annotation | Linear types - use exactly once | ✅ Complete |
+| `@device` annotation | MMIO pointer parameters | ✅ Complete |
+| `@volatile` annotation | Hardware register structs | ✅ Complete |
+| `DeviceDef` | `@device NAME 0xADDRESS` declarations | ✅ Complete |
+| Linear Type Checker | Compile-time usage tracking | ✅ Complete |
+| Hex address literals | `0x40000000` format support | ✅ Complete |
+
+### Planned Features (Future)
 
 ### Spatial Pointer Safety
 
@@ -393,20 +410,20 @@ add %i_2 %i_1 1   # Clear: %i_2 depends on %i_1
 
 ---
 
-## v0.11.0: Diagnostics & Tooling
+## v0.11.0: Diagnostics & Tooling ✅ COMPLETE
 
 **Goal**: Actionable error messages, SMT counterexamples, contract assistance, and structural analysis
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| Structured error format (JSON) | High | Medium |
-| SMT counterexample visualization | Critical | High |
-| Fix suggestions in errors | High | Medium |
-| IDE integration (LSP enhancements) | High | Medium |
-| **Invariant suggestion mode** | High | Very High |
-| **Structural Synthesis (`.bmbmap`)** | High | High |
-| Coverage reporting | Medium | Medium |
-| Performance profiling hooks | Low | Medium |
+| Task | Priority | Complexity | Status |
+|------|----------|------------|--------|
+| Structured error format (JSON) | High | Medium | ✅ Done |
+| SMT counterexample visualization | Critical | High | ✅ Done |
+| Fix suggestions in errors | High | Medium | ✅ Done |
+| IDE integration (LSP enhancements) | High | Medium | ✅ Done |
+| **Invariant suggestion mode** | High | Very High | ✅ Done |
+| **Structural Synthesis (`.bmbmap`)** | High | High | Planned |
+| Coverage reporting | Medium | Medium | Planned |
+| Performance profiling hooks | Low | Medium | Planned |
 
 ### Structural Synthesis (`.bmbmap`)
 
@@ -993,6 +1010,9 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 11.0 | 2025-12-24 | v0.11.0 Complete: Diagnostics struct + JSON serialization, LSP-compatible errors, SMT counterexample visualization, invariant suggestion with SMT verification and CLI --suggest-invariants |
+| 10.0 | 2025-12-24 | v0.10.0 Complete: @consume/@device/@volatile annotations, Linear Type Checker, DeviceDef, hex address literals |
+| 9.0 | 2025-12-24 | v0.9.0 Complete: String/Str types with UTF-8 validity constraints |
 | 8.2 | 2025-12-23 | v0.8.0 Complete: Refined Types, Option<T>, Result<T,E>, Vector<T>, Slice<T> type definitions implemented |
 | 8.1 | 2025-12-23 | AI-Native re-evaluation: "Signal Density" replaces "Token Efficiency"; Spec-Defined Defaults conditional on tooling; Auto-SSA deferred |
 | 8.0 | 2025-12-23 | v0.8.0 "Efficient Explicitness": Refined Types, Spec-Defined Defaults, Auto-SSA; v0.11.0 adds Structural Synthesis |

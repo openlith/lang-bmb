@@ -152,6 +152,10 @@ enum Commands {
         /// Output verification results as JSON
         #[arg(long)]
         json: bool,
+
+        /// Suggest loop invariants using heuristics and SMT verification
+        #[arg(long)]
+        suggest_invariants: bool,
     },
 }
 
@@ -181,7 +185,8 @@ fn main() -> ExitCode {
             solver,
             emit_smt,
             json,
-        } => cmd_verify(file, solver, emit_smt, json),
+            suggest_invariants,
+        } => cmd_verify(file, solver, emit_smt, json, suggest_invariants),
     }
 }
 
@@ -1086,6 +1091,7 @@ fn cmd_verify(
     solver: Option<String>,
     emit_smt: bool,
     json: bool,
+    suggest_invariants: bool,
 ) -> ExitCode {
     // Set solver if specified
     if let Some(ref s) = solver {
@@ -1141,6 +1147,66 @@ fn cmd_verify(
                 }
             }
         }
+        return ExitCode::SUCCESS;
+    }
+
+    // If suggest_invariants, run invariant suggestion for loops
+    if suggest_invariants {
+        println!(
+            "{} Analyzing loops in {} for invariant suggestions",
+            "Invariants".cyan().bold(),
+            file.display()
+        );
+        println!();
+
+        let mut total_suggestions = 0;
+        for node in &typed_ast.nodes {
+            // Find loop labels in the node
+            let loop_labels = find_loop_labels(node);
+
+            for label in loop_labels {
+                let candidates = bmb::smt::suggest_verified_invariants(node, &label);
+
+                if candidates.is_empty() {
+                    continue;
+                }
+
+                total_suggestions += candidates.len();
+
+                if json {
+                    let json_output = serde_json::json!({
+                        "node": node.node.name.name,
+                        "loop": label,
+                        "candidates": candidates.iter().map(|c| {
+                            serde_json::json!({
+                                "invariant": c.candidate.readable.clone(),
+                                "status": format!("{:?}", c.status),
+                                "confidence": c.adjusted_confidence,
+                                "rationale": c.candidate.rationale.clone()
+                            })
+                        }).collect::<Vec<_>>()
+                    });
+                    println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+                } else {
+                    println!("{} {} (loop _{})", "→".cyan(), node.node.name.name.bold(), label);
+                    println!("{}", bmb::smt::format_verified_candidates(&candidates));
+                }
+            }
+        }
+
+        if total_suggestions == 0 {
+            println!(
+                "{} No loop invariant suggestions found",
+                "Note".yellow().bold()
+            );
+        } else {
+            println!(
+                "{} Found {} invariant candidate(s)",
+                "Summary".green().bold(),
+                total_suggestions
+            );
+        }
+
         return ExitCode::SUCCESS;
     }
 
@@ -1307,6 +1373,7 @@ fn cmd_verify(
     _solver: Option<String>,
     _emit_smt: bool,
     _json: bool,
+    _suggest_invariants: bool,
 ) -> ExitCode {
     eprintln!(
         "{}: SMT verification requires the 'smt' feature. Recompile with:",
@@ -1314,4 +1381,43 @@ fn cmd_verify(
     );
     eprintln!("  cargo build --features smt");
     ExitCode::FAILURE
+}
+
+/// Find loop labels in a typed node by scanning for label instructions
+/// that are referenced by backward jumps (jmp/jif to earlier labels)
+#[cfg(feature = "smt")]
+fn find_loop_labels(node: &bmb::types::TypedNode) -> Vec<String> {
+    let mut labels: Vec<String> = Vec::new();
+    let mut label_indices: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    // First pass: record all label positions
+    for (idx, instr) in node.node.body.iter().enumerate() {
+        if let bmb::ast::Instruction::Label(ident) = instr {
+            label_indices.insert(ident.name.clone(), idx);
+        }
+    }
+
+    // Second pass: find backward jumps (indicating loops)
+    for (idx, instr) in node.node.body.iter().enumerate() {
+        if let bmb::ast::Instruction::Statement(stmt) = instr {
+            let opcode_str = format!("{:?}", stmt.opcode).to_lowercase();
+            if opcode_str.contains("jmp") || opcode_str.contains("jif") {
+                // Check if any operand is a label that's before this instruction
+                for operand in &stmt.operands {
+                    if let bmb::ast::Operand::Label(label_ident) = operand {
+                        if let Some(&label_idx) = label_indices.get(&label_ident.name) {
+                            if label_idx < idx {
+                                // This is a backward jump - it's a loop
+                                if !labels.contains(&label_ident.name) {
+                                    labels.push(label_ident.name.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    labels
 }
