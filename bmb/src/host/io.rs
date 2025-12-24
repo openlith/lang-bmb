@@ -193,7 +193,6 @@ pub fn new_shared_file_table() -> SharedFileTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn test_open_mode_conversion() {

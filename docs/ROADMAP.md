@@ -3,7 +3,7 @@
 > **"Omission is guessing, and guessing is error."**
 
 **Last Updated**: 2025-12-24
-**Current Version**: v0.15.0
+**Current Version**: v0.15.3
 **Target**: v1.0.0 (Performance Transcendence)
 
 ---
