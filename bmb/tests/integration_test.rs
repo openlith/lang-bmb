@@ -3045,6 +3045,98 @@ impl StdlibState {
             -1 // invalid handle
         }
     }
+
+    // =========================================================================
+    // v0.15.6: String Operations (handle-based)
+    // =========================================================================
+
+    fn string_new(&mut self) -> i32 {
+        let handle = self.next_string_handle;
+        self.next_string_handle += 1;
+        self.strings.insert(handle, String::new());
+        handle
+    }
+
+    fn string_push_byte(&mut self, handle: i32, byte: i32) -> i32 {
+        if let Some(s) = self.strings.get_mut(&handle) {
+            if byte >= 0 && byte <= 255 {
+                s.push(byte as u8 as char);
+                0 // success
+            } else {
+                -2 // invalid byte value
+            }
+        } else {
+            -1 // invalid handle
+        }
+    }
+
+    fn string_get_byte(&self, handle: i32, index: i32) -> i32 {
+        if let Some(s) = self.strings.get(&handle) {
+            let bytes = s.as_bytes();
+            if index >= 0 && (index as usize) < bytes.len() {
+                bytes[index as usize] as i32
+            } else {
+                -2 // out of bounds
+            }
+        } else {
+            -1 // invalid handle
+        }
+    }
+
+    fn string_len(&self, handle: i32) -> i32 {
+        if let Some(s) = self.strings.get(&handle) {
+            s.len() as i32
+        } else {
+            -1 // invalid handle
+        }
+    }
+
+    fn string_eq(&self, h1: i32, h2: i32) -> i32 {
+        match (self.strings.get(&h1), self.strings.get(&h2)) {
+            (Some(s1), Some(s2)) => if s1 == s2 { 1 } else { 0 },
+            _ => -1, // invalid handle
+        }
+    }
+
+    fn string_slice(&mut self, handle: i32, start: i32, end: i32) -> i32 {
+        if let Some(s) = self.strings.get(&handle) {
+            let bytes = s.as_bytes();
+            if start >= 0 && end >= start && (end as usize) <= bytes.len() {
+                let slice = &bytes[start as usize..end as usize];
+                let new_handle = self.next_string_handle;
+                self.next_string_handle += 1;
+                // Safe: we're slicing bytes that were valid chars
+                let new_str = String::from_utf8_lossy(slice).into_owned();
+                self.strings.insert(new_handle, new_str);
+                new_handle
+            } else {
+                -2 // invalid range
+            }
+        } else {
+            -1 // invalid handle
+        }
+    }
+
+    fn string_concat(&mut self, h1: i32, h2: i32) -> i32 {
+        let (s1, s2) = match (self.strings.get(&h1), self.strings.get(&h2)) {
+            (Some(a), Some(b)) => (a.clone(), b.clone()),
+            _ => return -1, // invalid handle
+        };
+        let new_handle = self.next_string_handle;
+        self.next_string_handle += 1;
+        let mut result = s1;
+        result.push_str(&s2);
+        self.strings.insert(new_handle, result);
+        new_handle
+    }
+
+    fn string_drop(&mut self, handle: i32) -> i32 {
+        if self.strings.remove(&handle).is_some() {
+            0 // success
+        } else {
+            -1 // invalid handle
+        }
+    }
 }
 
 /// Register stdlib host functions on a Linker
@@ -3115,6 +3207,50 @@ fn register_stdlib_functions(linker: &mut Linker<StdlibState>) -> Result<(), Err
     // is_whitespace(byte:i32) -> bool:i32 (0 or 1)
     linker.func_wrap("bmb_stdlib", "is_whitespace", |_caller: Caller<'_, StdlibState>, byte: i32| -> i32 {
         if byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D { 1 } else { 0 }
+    })?;
+
+    // =========================================================================
+    // v0.15.6: Handle-based String Operations
+    // =========================================================================
+
+    // string_new() -> handle:i32
+    linker.func_wrap("bmb_stdlib", "string_new", |mut caller: Caller<'_, StdlibState>| -> i32 {
+        caller.data_mut().string_new()
+    })?;
+
+    // string_push_byte(handle:i32, byte:i32) -> status:i32
+    linker.func_wrap("bmb_stdlib", "string_push_byte", |mut caller: Caller<'_, StdlibState>, handle: i32, byte: i32| -> i32 {
+        caller.data_mut().string_push_byte(handle, byte)
+    })?;
+
+    // string_get_byte(handle:i32, index:i32) -> byte:i32
+    linker.func_wrap("bmb_stdlib", "string_get_byte", |caller: Caller<'_, StdlibState>, handle: i32, index: i32| -> i32 {
+        caller.data().string_get_byte(handle, index)
+    })?;
+
+    // string_len_h(handle:i32) -> length:i32 (h suffix to distinguish from ptr-based)
+    linker.func_wrap("bmb_stdlib", "string_len_h", |caller: Caller<'_, StdlibState>, handle: i32| -> i32 {
+        caller.data().string_len(handle)
+    })?;
+
+    // string_eq(h1:i32, h2:i32) -> bool:i32 (1 if equal, 0 if not, -1 on error)
+    linker.func_wrap("bmb_stdlib", "string_eq", |caller: Caller<'_, StdlibState>, h1: i32, h2: i32| -> i32 {
+        caller.data().string_eq(h1, h2)
+    })?;
+
+    // string_slice(handle:i32, start:i32, end:i32) -> new_handle:i32
+    linker.func_wrap("bmb_stdlib", "string_slice", |mut caller: Caller<'_, StdlibState>, handle: i32, start: i32, end: i32| -> i32 {
+        caller.data_mut().string_slice(handle, start, end)
+    })?;
+
+    // string_concat(h1:i32, h2:i32) -> new_handle:i32
+    linker.func_wrap("bmb_stdlib", "string_concat", |mut caller: Caller<'_, StdlibState>, h1: i32, h2: i32| -> i32 {
+        caller.data_mut().string_concat(h1, h2)
+    })?;
+
+    // string_drop(handle:i32) -> status:i32
+    linker.func_wrap("bmb_stdlib", "string_drop", |mut caller: Caller<'_, StdlibState>, handle: i32| -> i32 {
+        caller.data_mut().string_drop(handle)
     })?;
 
     Ok(())
@@ -3671,4 +3807,463 @@ fn test_pattern_matching_bidirectional() {
     let err_999 = wrap_err.call(&mut store, 999).unwrap();
     let result = unwrap_or.call(&mut store, (err_999, -100)).unwrap();
     assert_eq!(result, -100, "unwrap_or(Err(_), -100) should return default -100");
+}
+
+// =============================================================================
+// v0.15.6: String Processing Operations Tests
+// =============================================================================
+
+#[test]
+fn test_stdlib_string_new_and_len() {
+    // v0.15.6: Test String creation and length via host functions
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node string_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_len_h
+@params handle:i32
+@returns i32
+
+@node test_string_create
+@params
+@returns i32
+  xcall %handle string_new
+  xcall %len string_len_h %handle
+  ret %len
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(), i32>(&mut store, "test_string_create")
+        .expect("test_string_create not found");
+
+    // New string should have length 0
+    let result = test_fn.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 0, "New string should have length 0");
+}
+
+#[test]
+fn test_stdlib_string_push_and_get() {
+    // v0.15.6: Test String push_byte and get_byte operations
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node string_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_push_byte
+@params handle:i32 byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_get_byte
+@params handle:i32 index:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_len_h
+@params handle:i32
+@returns i32
+
+@node test_string_push_get
+@params byte1:i32 byte2:i32
+@returns i32
+  xcall %handle string_new
+  xcall %_ string_push_byte %handle byte1
+  xcall %_ string_push_byte %handle byte2
+  xcall %len string_len_h %handle
+  xcall %b0 string_get_byte %handle 0
+  xcall %b1 string_get_byte %handle 1
+  # Return: len*1000 + b0*10 + b1 (e.g., 2*1000 + 65*10 + 66 = 2716 for "AB")
+  mul %r1 %len 1000
+  mul %r2 %b0 10
+  add %r3 %r1 %r2
+  add %r4 %r3 %b1
+  ret %r4
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(i32, i32), i32>(&mut store, "test_string_push_get")
+        .expect("test_string_push_get not found");
+
+    // Push 'A' (65) and 'B' (66): len=2, result = 2*1000 + 65*10 + 66 = 2716
+    let result = test_fn.call(&mut store, (65, 66)).expect("call failed");
+    assert_eq!(result, 2716, "Should return 2*1000 + 65*10 + 66 = 2716");
+
+    // Push 'X' (88) and 'Y' (89): len=2, result = 2*1000 + 88*10 + 89 = 2969
+    let result = test_fn.call(&mut store, (88, 89)).expect("call failed");
+    assert_eq!(result, 2969, "Should return 2*1000 + 88*10 + 89 = 2969");
+}
+
+#[test]
+fn test_stdlib_string_eq() {
+    // v0.15.6: Test String equality comparison
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node string_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_push_byte
+@params handle:i32 byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_eq
+@params h1:i32 h2:i32
+@returns i32
+
+@node build_ab
+@params
+@returns i32
+  xcall %s string_new
+  xcall %_ string_push_byte %s 65
+  xcall %_ string_push_byte %s 66
+  ret %s
+
+@node test_string_eq_same
+@params
+@returns i32
+  call %s1 build_ab
+  call %s2 build_ab
+  xcall %eq string_eq %s1 %s2
+  ret %eq
+
+@node test_string_eq_empty
+@params
+@returns i32
+  xcall %s1 string_new
+  xcall %s2 string_new
+  xcall %eq string_eq %s1 %s2
+  ret %eq
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    // Test equality of "AB" and "AB"
+    let test_same = instance
+        .get_typed_func::<(), i32>(&mut store, "test_string_eq_same")
+        .expect("test_string_eq_same not found");
+    let result = test_same.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 1, "Two 'AB' strings should be equal");
+
+    // Test equality of empty strings
+    let test_empty = instance
+        .get_typed_func::<(), i32>(&mut store, "test_string_eq_empty")
+        .expect("test_string_eq_empty not found");
+    let result = test_empty.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 1, "Two empty strings should be equal");
+}
+
+#[test]
+fn test_stdlib_string_slice() {
+    // v0.15.6: Test String slicing
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node string_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_push_byte
+@params handle:i32 byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_slice
+@params handle:i32 start:i32 end:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_len_h
+@params handle:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_get_byte
+@params handle:i32 index:i32
+@returns i32
+
+@node test_string_slice
+@params
+@returns i32
+  # Build "HELLO" (72, 69, 76, 76, 79)
+  xcall %s string_new
+  xcall %_ string_push_byte %s 72
+  xcall %_ string_push_byte %s 69
+  xcall %_ string_push_byte %s 76
+  xcall %_ string_push_byte %s 76
+  xcall %_ string_push_byte %s 79
+  # Slice [1:4] = "ELL" (69, 76, 76)
+  xcall %slice string_slice %s 1 4
+  xcall %len string_len_h %slice
+  xcall %b0 string_get_byte %slice 0
+  xcall %b1 string_get_byte %slice 1
+  xcall %b2 string_get_byte %slice 2
+  # Return: len*10000 + b0*100 + b1*10 + b2 = 3*10000 + 69*100 + 76*10 + 76 = 37636
+  mul %r1 %len 10000
+  mul %r2 %b0 100
+  mul %r3 %b1 10
+  add %r4 %r1 %r2
+  add %r5 %r4 %r3
+  add %r6 %r5 %b2
+  ret %r6
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(), i32>(&mut store, "test_string_slice")
+        .expect("test_string_slice not found");
+
+    // Slice "HELLO"[1:4] = "ELL", len=3, bytes=69,76,76
+    // 3*10000 + 69*100 + 76*10 + 76 = 30000 + 6900 + 760 + 76 = 37736
+    let result = test_fn.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 37736, "Slice should be 'ELL': len=3, bytes=69,76,76");
+}
+
+#[test]
+fn test_stdlib_string_concat() {
+    // v0.15.6: Test String concatenation
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node string_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_push_byte
+@params handle:i32 byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_concat
+@params h1:i32 h2:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_len_h
+@params handle:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_get_byte
+@params handle:i32 index:i32
+@returns i32
+
+@node test_string_concat
+@params
+@returns i32
+  # Build "AB" (65, 66)
+  xcall %s1 string_new
+  xcall %_ string_push_byte %s1 65
+  xcall %_ string_push_byte %s1 66
+  # Build "CD" (67, 68)
+  xcall %s2 string_new
+  xcall %_ string_push_byte %s2 67
+  xcall %_ string_push_byte %s2 68
+  # Concat to get "ABCD"
+  xcall %s3 string_concat %s1 %s2
+  xcall %len string_len_h %s3
+  xcall %b0 string_get_byte %s3 0
+  xcall %b3 string_get_byte %s3 3
+  # Return: len*1000 + b0*10 + b3 = 4*1000 + 65*10 + 68 = 4718
+  mul %r1 %len 1000
+  mul %r2 %b0 10
+  add %r3 %r1 %r2
+  add %r4 %r3 %b3
+  ret %r4
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(), i32>(&mut store, "test_string_concat")
+        .expect("test_string_concat not found");
+
+    // "AB" + "CD" = "ABCD", len=4, first='A'(65), last='D'(68)
+    // 4*1000 + 65*10 + 68 = 4000 + 650 + 68 = 4718
+    let result = test_fn.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 4718, "Concat 'AB'+'CD'='ABCD': len=4, first=65, last=68");
+}
+
+#[test]
+fn test_stdlib_string_drop() {
+    // v0.15.6: Test String drop (cleanup)
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node string_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_push_byte
+@params handle:i32 byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_drop
+@params handle:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_len_h
+@params handle:i32
+@returns i32
+
+@node test_string_drop
+@params
+@returns i32
+  xcall %handle string_new
+  xcall %_ string_push_byte %handle 65
+  xcall %_ string_push_byte %handle 66
+  xcall %drop_result string_drop %handle
+  # After drop, length should return -1 (invalid handle)
+  xcall %len string_len_h %handle
+  # Return: drop_result*10 + len = 0*10 + (-1) = -1
+  mul %r1 %drop_result 10
+  add %r2 %r1 %len
+  ret %r2
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(), i32>(&mut store, "test_string_drop")
+        .expect("test_string_drop not found");
+
+    // drop returns 0, len of dropped returns -1: 0*10 + -1 = -1
+    let result = test_fn.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, -1, "Drop should succeed (0), len of dropped should be -1");
+}
+
+#[test]
+fn test_stdlib_string_iteration() {
+    // v0.15.6: Test iterating over string bytes via get_byte
+    // Uses explicit index access pattern (simpler than loop for WASM codegen)
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node string_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_push_byte
+@params handle:i32 byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_len_h
+@params handle:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_get_byte
+@params handle:i32 index:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node is_digit
+@params byte:i32
+@returns i32
+
+@node test_iterate_string
+@params
+@returns i32
+  # Build "a1b" (97, 49, 98)
+  xcall %s string_new
+  xcall %_ string_push_byte %s 97
+  xcall %_ string_push_byte %s 49
+  xcall %_ string_push_byte %s 98
+  xcall %len string_len_h %s
+  # Get each byte and check if digit
+  xcall %b0 string_get_byte %s 0
+  xcall %d0 is_digit %b0
+  xcall %b1 string_get_byte %s 1
+  xcall %d1 is_digit %b1
+  xcall %b2 string_get_byte %s 2
+  xcall %d2 is_digit %b2
+  # Sum of is_digit results: 0 + 1 + 0 = 1
+  add %sum1 %d0 %d1
+  add %sum2 %sum1 %d2
+  # Return: len*10 + digit_count = 3*10 + 1 = 31
+  mul %r1 %len 10
+  add %result %r1 %sum2
+  ret %result
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(), i32>(&mut store, "test_iterate_string")
+        .expect("test_iterate_string not found");
+
+    // "a1b": len=3, digits=1 (just '1')
+    // Result = 3*10 + 1 = 31
+    let result = test_fn.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 31, "'a1b' should have len=3, digit_count=1: 3*10+1=31");
 }
