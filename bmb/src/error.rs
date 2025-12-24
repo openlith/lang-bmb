@@ -1004,6 +1004,184 @@ pub fn create_add_invariant_action(
         .build()
 }
 
+
+/// Error accumulator for collecting multiple diagnostics (v0.13+)
+///
+/// Enables "recoverable" compilation phases that can continue after errors,
+/// collecting all problems for comprehensive error reporting.
+///
+/// # Example
+/// ```ignore
+/// let mut errors = ErrorCollector::new();
+///
+/// // Collect errors without returning early
+/// if let Err(e) = check_type(expr1) {
+///     errors.push_error(e);
+/// }
+/// if let Err(e) = check_type(expr2) {
+///     errors.push_error(e);
+/// }
+///
+/// // Report all errors or proceed if none
+/// errors.into_result(())?;
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct ErrorCollector {
+    /// Collected errors
+    errors: Vec<Diagnostic>,
+    /// Collected warnings (non-fatal)
+    warnings: Vec<Diagnostic>,
+}
+
+impl ErrorCollector {
+    /// Create a new empty error collector
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an error diagnostic
+    pub fn push_error(&mut self, diagnostic: impl Into<Diagnostic>) {
+        self.errors.push(diagnostic.into());
+    }
+
+    /// Add a warning diagnostic
+    pub fn push_warning(&mut self, diagnostic: impl Into<Diagnostic>) {
+        self.warnings.push(diagnostic.into());
+    }
+
+    /// Add error from a Result, returning the Ok value if present
+    pub fn check<T, E: Into<Diagnostic>>(&mut self, result: Result<T, E>) -> Option<T> {
+        match result {
+            Ok(v) => Some(v),
+            Err(e) => {
+                self.push_error(e);
+                None
+            }
+        }
+    }
+
+    /// Check if any errors have been collected
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    /// Check if any warnings have been collected
+    pub fn has_warnings(&self) -> bool {
+        !self.warnings.is_empty()
+    }
+
+    /// Get number of errors
+    pub fn error_count(&self) -> usize {
+        self.errors.len()
+    }
+
+    /// Get number of warnings
+    pub fn warning_count(&self) -> usize {
+        self.warnings.len()
+    }
+
+    /// Get all errors
+    pub fn errors(&self) -> &[Diagnostic] {
+        &self.errors
+    }
+
+    /// Get all warnings
+    pub fn warnings(&self) -> &[Diagnostic] {
+        &self.warnings
+    }
+
+    /// Take all errors, leaving an empty collector
+    pub fn take_errors(&mut self) -> Vec<Diagnostic> {
+        std::mem::take(&mut self.errors)
+    }
+
+    /// Merge another collector into this one
+    pub fn merge(&mut self, other: ErrorCollector) {
+        self.errors.extend(other.errors);
+        self.warnings.extend(other.warnings);
+    }
+
+    /// Convert to Result: Ok if no errors, Err with first error otherwise
+    pub fn into_result<T>(self, ok_value: T) -> Result<T, Diagnostic> {
+        if self.errors.is_empty() {
+            Ok(ok_value)
+        } else {
+            Err(self.errors.into_iter().next().unwrap())
+        }
+    }
+
+    /// Convert to Result with all errors in a combined diagnostic
+    pub fn into_combined_result<T>(self, ok_value: T) -> Result<T, Diagnostic> {
+        if self.errors.is_empty() {
+            Ok(ok_value)
+        } else if self.errors.len() == 1 {
+            Err(self.errors.into_iter().next().unwrap())
+        } else {
+            let count = self.errors.len();
+            let first = self.errors.into_iter().next().unwrap();
+            let combined = Diagnostic::new(
+                first.code,
+                format!("{} ({} more errors)", first.message, count - 1),
+            )
+            .with_span(first.span.unwrap_or_default());
+            Err(combined)
+        }
+    }
+
+    /// Format all errors with source context
+    pub fn format_all(&self, source: &str) -> String {
+        let mut output = String::new();
+        for diag in &self.errors {
+            output.push_str(&diag.format_with_source(source));
+            output.push('\n');
+        }
+        for diag in &self.warnings {
+            output.push_str(&format!("warning[{}]: {}\n", diag.code, diag.message));
+        }
+        if !self.errors.is_empty() {
+            output.push_str(&format!(
+                "\nerror: could not compile, {} error(s) found\n",
+                self.errors.len()
+            ));
+        }
+        output
+    }
+
+    /// Create collector from an iterator of results
+    pub fn collect_results<T, E, I>(iter: I) -> (Vec<T>, Self)
+    where
+        I: IntoIterator<Item = Result<T, E>>,
+        E: Into<Diagnostic>,
+    {
+        let mut collector = Self::new();
+        let mut successes = Vec::new();
+        for result in iter {
+            if let Some(v) = collector.check(result) {
+                successes.push(v);
+            }
+        }
+        (successes, collector)
+    }
+}
+
+impl From<Diagnostic> for ErrorCollector {
+    fn from(diag: Diagnostic) -> Self {
+        let mut collector = Self::new();
+        collector.push_error(diag);
+        collector
+    }
+}
+
+impl std::iter::FromIterator<Diagnostic> for ErrorCollector {
+    fn from_iter<I: IntoIterator<Item = Diagnostic>>(iter: I) -> Self {
+        let mut collector = Self::new();
+        for diag in iter {
+            collector.push_error(diag);
+        }
+        collector
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1391,4 +1569,89 @@ mod tests {
         assert!(display.contains("(no specific values)"));
     }
 
+
+    #[test]
+    fn test_error_collector_new() {
+        let collector = ErrorCollector::new();
+        assert!(!collector.has_errors());
+        assert!(!collector.has_warnings());
+        assert_eq!(collector.error_count(), 0);
+    }
+
+    #[test]
+    fn test_error_collector_push_error() {
+        let mut collector = ErrorCollector::new();
+        collector.push_error(Diagnostic::new(ErrorCode::E100, "test error"));
+        assert!(collector.has_errors());
+        assert_eq!(collector.error_count(), 1);
+    }
+
+    #[test]
+    fn test_error_collector_push_warning() {
+        let mut collector = ErrorCollector::new();
+        collector.push_warning(Diagnostic::new(ErrorCode::E100, "test warning"));
+        assert!(!collector.has_errors());
+        assert!(collector.has_warnings());
+        assert_eq!(collector.warning_count(), 1);
+    }
+
+    #[test]
+    fn test_error_collector_check_ok() {
+        let mut collector = ErrorCollector::new();
+        let result: Result<i32, Diagnostic> = Ok(42);
+        let value = collector.check(result);
+        assert_eq!(value, Some(42));
+        assert!(!collector.has_errors());
+    }
+
+    #[test]
+    fn test_error_collector_check_err() {
+        let mut collector = ErrorCollector::new();
+        let result: Result<i32, Diagnostic> = Err(Diagnostic::new(ErrorCode::E100, "error"));
+        let value = collector.check(result);
+        assert_eq!(value, None);
+        assert!(collector.has_errors());
+    }
+
+    #[test]
+    fn test_error_collector_merge() {
+        let mut c1 = ErrorCollector::new();
+        c1.push_error(Diagnostic::new(ErrorCode::E100, "error 1"));
+
+        let mut c2 = ErrorCollector::new();
+        c2.push_error(Diagnostic::new(ErrorCode::E101, "error 2"));
+        c2.push_warning(Diagnostic::new(ErrorCode::E100, "warning 1"));
+
+        c1.merge(c2);
+        assert_eq!(c1.error_count(), 2);
+        assert_eq!(c1.warning_count(), 1);
+    }
+
+    #[test]
+    fn test_error_collector_into_result() {
+        let collector = ErrorCollector::new();
+        let result: Result<(), Diagnostic> = collector.into_result(());
+        assert!(result.is_ok());
+
+        let mut collector2 = ErrorCollector::new();
+        collector2.push_error(Diagnostic::new(ErrorCode::E100, "error"));
+        let result2: Result<(), Diagnostic> = collector2.into_result(());
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn test_error_collector_format_all() {
+        let mut collector = ErrorCollector::new();
+        collector.push_error(
+            Diagnostic::new(ErrorCode::E100, "first error")
+                .with_span(crate::ast::Span::new(0, 5, 1, 1)),
+        );
+        collector.push_error(Diagnostic::new(ErrorCode::E101, "second error"));
+
+        let source = "let x = 42;";
+        let formatted = collector.format_all(source);
+        assert!(formatted.contains("first error"));
+        assert!(formatted.contains("second error"));
+        assert!(formatted.contains("2 error(s) found"));
+    }
 }
