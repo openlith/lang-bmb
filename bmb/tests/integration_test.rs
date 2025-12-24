@@ -2971,3 +2971,481 @@ fn test_modules_merged_program_qualified_lookup() {
     assert!(merged.get_node("nonexistent").is_none());
     assert!(merged.get_node("other::adder").is_none());
 }
+
+// =============================================================================
+// v0.15.4: Stdlib Host Functions - Collection Operations
+// =============================================================================
+// Philosophy: "Omission is guessing" - explicit contracts on all operations
+// Strategy: Host functions provide complex operations until full codegen ready
+// Pattern: Pointer+Length for strings, handle-based for collections
+// =============================================================================
+
+/// State for stdlib host functions
+/// Manages host-side collections that WASM code can manipulate via handles
+#[derive(Default)]
+struct StdlibState {
+    /// Vector storage: handle (i32) -> Vec<i32>
+    vectors: std::collections::HashMap<i32, Vec<i32>>,
+    next_vector_handle: i32,
+    /// String storage: handle (i32) -> String
+    strings: std::collections::HashMap<i32, String>,
+    next_string_handle: i32,
+}
+
+impl StdlibState {
+    fn new() -> Self {
+        Self {
+            vectors: std::collections::HashMap::new(),
+            next_vector_handle: 1, // 0 reserved for null
+            strings: std::collections::HashMap::new(),
+            next_string_handle: 1,
+        }
+    }
+
+    fn vector_new(&mut self) -> i32 {
+        let handle = self.next_vector_handle;
+        self.next_vector_handle += 1;
+        self.vectors.insert(handle, Vec::new());
+        handle
+    }
+
+    fn vector_push(&mut self, handle: i32, value: i32) -> i32 {
+        if let Some(vec) = self.vectors.get_mut(&handle) {
+            vec.push(value);
+            0 // success
+        } else {
+            -1 // invalid handle
+        }
+    }
+
+    fn vector_get(&self, handle: i32, index: i32) -> i32 {
+        if let Some(vec) = self.vectors.get(&handle) {
+            if index >= 0 && (index as usize) < vec.len() {
+                vec[index as usize]
+            } else {
+                i32::MIN // out of bounds marker
+            }
+        } else {
+            i32::MIN // invalid handle
+        }
+    }
+
+    fn vector_len(&self, handle: i32) -> i32 {
+        if let Some(vec) = self.vectors.get(&handle) {
+            vec.len() as i32
+        } else {
+            -1 // invalid handle
+        }
+    }
+
+    fn vector_drop(&mut self, handle: i32) -> i32 {
+        if self.vectors.remove(&handle).is_some() {
+            0 // success
+        } else {
+            -1 // invalid handle
+        }
+    }
+}
+
+/// Register stdlib host functions on a Linker
+fn register_stdlib_functions(linker: &mut Linker<StdlibState>) -> Result<(), Error> {
+    // vector_i32_new() -> handle:i32
+    linker.func_wrap("bmb_stdlib", "vector_i32_new", |mut caller: Caller<'_, StdlibState>| -> i32 {
+        caller.data_mut().vector_new()
+    })?;
+
+    // vector_i32_push(handle:i32, value:i32) -> status:i32
+    linker.func_wrap("bmb_stdlib", "vector_i32_push", |mut caller: Caller<'_, StdlibState>, handle: i32, value: i32| -> i32 {
+        caller.data_mut().vector_push(handle, value)
+    })?;
+
+    // vector_i32_get(handle:i32, index:i32) -> value:i32
+    linker.func_wrap("bmb_stdlib", "vector_i32_get", |caller: Caller<'_, StdlibState>, handle: i32, index: i32| -> i32 {
+        caller.data().vector_get(handle, index)
+    })?;
+
+    // vector_i32_len(handle:i32) -> length:i32
+    linker.func_wrap("bmb_stdlib", "vector_i32_len", |caller: Caller<'_, StdlibState>, handle: i32| -> i32 {
+        caller.data().vector_len(handle)
+    })?;
+
+    // vector_i32_drop(handle:i32) -> status:i32
+    linker.func_wrap("bmb_stdlib", "vector_i32_drop", |mut caller: Caller<'_, StdlibState>, handle: i32| -> i32 {
+        caller.data_mut().vector_drop(handle)
+    })?;
+
+    // string_len(ptr:i32, len:i32) -> length:i32
+    // Reads string from WASM memory and returns its byte length
+    linker.func_wrap("bmb_stdlib", "string_len", |_caller: Caller<'_, StdlibState>, _ptr: i32, len: i32| -> i32 {
+        // For now, just return the provided length (string is already in memory)
+        // In full implementation, would validate UTF-8
+        len
+    })?;
+
+    // string_byte_at(ptr:i32, len:i32, index:i32) -> byte:i32
+    // Returns byte at index, or -1 if out of bounds
+    linker.func_wrap("bmb_stdlib", "string_byte_at", |mut caller: Caller<'_, StdlibState>, ptr: i32, len: i32, index: i32| -> i32 {
+        if index < 0 || index >= len {
+            return -1; // out of bounds
+        }
+        // Access WASM memory to read the byte
+        if let Some(Extern::Memory(mem)) = caller.get_export("memory") {
+            let data = mem.data(&caller);
+            let offset = (ptr + index) as usize;
+            if offset < data.len() {
+                data[offset] as i32
+            } else {
+                -1 // memory access out of bounds
+            }
+        } else {
+            -1 // no memory export
+        }
+    })?;
+
+    // is_digit(byte:i32) -> bool:i32 (0 or 1)
+    linker.func_wrap("bmb_stdlib", "is_digit", |_caller: Caller<'_, StdlibState>, byte: i32| -> i32 {
+        if byte >= 0x30 && byte <= 0x39 { 1 } else { 0 } // '0'-'9'
+    })?;
+
+    // is_alpha(byte:i32) -> bool:i32 (0 or 1)
+    linker.func_wrap("bmb_stdlib", "is_alpha", |_caller: Caller<'_, StdlibState>, byte: i32| -> i32 {
+        if (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A) { 1 } else { 0 }
+    })?;
+
+    // is_whitespace(byte:i32) -> bool:i32 (0 or 1)
+    linker.func_wrap("bmb_stdlib", "is_whitespace", |_caller: Caller<'_, StdlibState>, byte: i32| -> i32 {
+        if byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D { 1 } else { 0 }
+    })?;
+
+    Ok(())
+}
+
+#[test]
+fn test_stdlib_vector_new_and_len() {
+    // v0.15.4: Test Vector creation via host function
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node vector_i32_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_len
+@params handle:i32
+@returns i32
+
+@node test_vector_create
+@params
+@returns i32
+  xcall %handle vector_i32_new
+  xcall %len vector_i32_len %handle
+  ret %len
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(), i32>(&mut store, "test_vector_create")
+        .expect("test_vector_create not found");
+
+    // New vector should have length 0
+    let result = test_fn.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 0, "New vector should have length 0");
+}
+
+#[test]
+fn test_stdlib_vector_push_and_get() {
+    // v0.15.4: Test Vector push and get operations
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node vector_i32_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_push
+@params handle:i32 value:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_get
+@params handle:i32 index:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_len
+@params handle:i32
+@returns i32
+
+@node test_vector_push_get
+@params value:i32
+@returns i32
+  # Create vector
+  xcall %handle vector_i32_new
+
+  # Push value three times
+  xcall %_ vector_i32_push %handle value
+  xcall %_ vector_i32_push %handle value
+  xcall %_ vector_i32_push %handle value
+
+  # Get length (should be 3)
+  xcall %len vector_i32_len %handle
+
+  # Get first element
+  xcall %first vector_i32_get %handle 0
+
+  # Return first + len (value + 3)
+  add %result %first %len
+  ret %result
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<i32, i32>(&mut store, "test_vector_push_get")
+        .expect("test_vector_push_get not found");
+
+    // test_vector_push_get(42) = 42 + 3 = 45
+    let result = test_fn.call(&mut store, 42).expect("call failed");
+    assert_eq!(result, 45, "Should return first element (42) + length (3) = 45");
+
+    // test_vector_push_get(100) = 100 + 3 = 103
+    let result = test_fn.call(&mut store, 100).expect("call failed");
+    assert_eq!(result, 103, "Should return first element (100) + length (3) = 103");
+}
+
+#[test]
+fn test_stdlib_vector_drop() {
+    // v0.15.4: Test Vector drop (cleanup)
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node vector_i32_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_push
+@params handle:i32 value:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_drop
+@params handle:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_len
+@params handle:i32
+@returns i32
+
+@node test_vector_drop
+@params
+@returns i32
+  # Create and populate vector
+  xcall %handle vector_i32_new
+  xcall %_ vector_i32_push %handle 1
+  xcall %_ vector_i32_push %handle 2
+
+  # Drop the vector (should return 0 for success)
+  xcall %drop_result vector_i32_drop %handle
+
+  # Try to get length of dropped vector (should return -1)
+  xcall %len vector_i32_len %handle
+
+  # Return drop_result * 10 + len (0 * 10 + -1 = -1)
+  mul %r1 %drop_result 10
+  add %result %r1 %len
+  ret %result
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(), i32>(&mut store, "test_vector_drop")
+        .expect("test_vector_drop not found");
+
+    // drop returns 0, len of dropped returns -1: 0 * 10 + -1 = -1
+    let result = test_fn.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, -1, "Drop should succeed (0), len of dropped should be -1");
+}
+
+#[test]
+fn test_stdlib_char_classification() {
+    // v0.15.4: Test character classification functions
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node is_digit
+@params byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node is_alpha
+@params byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node is_whitespace
+@params byte:i32
+@returns i32
+
+@node test_char_classification
+@params byte:i32
+@returns i32
+  # Return: is_digit * 4 + is_alpha * 2 + is_whitespace
+  # This encodes all three results in a single return value
+  xcall %d is_digit byte
+  xcall %a is_alpha byte
+  xcall %w is_whitespace byte
+
+  mul %r1 %d 4
+  mul %r2 %a 2
+  add %r3 %r1 %r2
+  add %result %r3 %w
+  ret %result
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<i32, i32>(&mut store, "test_char_classification")
+        .expect("test_char_classification not found");
+
+    // '0' (0x30) = digit only: 4*1 + 2*0 + 0 = 4
+    let result = test_fn.call(&mut store, 0x30).expect("call failed");
+    assert_eq!(result, 4, "'0' should be digit only");
+
+    // '9' (0x39) = digit only: 4*1 + 2*0 + 0 = 4
+    let result = test_fn.call(&mut store, 0x39).expect("call failed");
+    assert_eq!(result, 4, "'9' should be digit only");
+
+    // 'A' (0x41) = alpha only: 4*0 + 2*1 + 0 = 2
+    let result = test_fn.call(&mut store, 0x41).expect("call failed");
+    assert_eq!(result, 2, "'A' should be alpha only");
+
+    // 'z' (0x7A) = alpha only: 4*0 + 2*1 + 0 = 2
+    let result = test_fn.call(&mut store, 0x7A).expect("call failed");
+    assert_eq!(result, 2, "'z' should be alpha only");
+
+    // ' ' (0x20) = whitespace only: 4*0 + 2*0 + 1 = 1
+    let result = test_fn.call(&mut store, 0x20).expect("call failed");
+    assert_eq!(result, 1, "space should be whitespace only");
+
+    // '\n' (0x0A) = whitespace only: 4*0 + 2*0 + 1 = 1
+    let result = test_fn.call(&mut store, 0x0A).expect("call failed");
+    assert_eq!(result, 1, "newline should be whitespace only");
+
+    // '+' (0x2B) = none: 4*0 + 2*0 + 0 = 0
+    let result = test_fn.call(&mut store, 0x2B).expect("call failed");
+    assert_eq!(result, 0, "'+' should match none");
+}
+
+#[test]
+fn test_stdlib_multiple_vectors() {
+    // v0.15.4: Test multiple independent vectors
+    let source = r#"
+@extern "C" from "bmb_stdlib"
+@node vector_i32_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_push
+@params handle:i32 value:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node vector_i32_len
+@params handle:i32
+@returns i32
+
+@node test_multiple_vectors
+@params
+@returns i32
+  # Create two independent vectors
+  xcall %v1 vector_i32_new
+  xcall %v2 vector_i32_new
+
+  # Push to v1: 3 elements
+  xcall %_ vector_i32_push %v1 10
+  xcall %_ vector_i32_push %v1 20
+  xcall %_ vector_i32_push %v1 30
+
+  # Push to v2: 2 elements
+  xcall %_ vector_i32_push %v2 100
+  xcall %_ vector_i32_push %v2 200
+
+  # Get lengths
+  xcall %len1 vector_i32_len %v1
+  xcall %len2 vector_i32_len %v2
+
+  # Return len1 * 10 + len2 = 3 * 10 + 2 = 32
+  mul %r1 %len1 10
+  add %result %r1 %len2
+  ret %result
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    register_stdlib_functions(&mut linker).expect("failed to register stdlib");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, StdlibState::new());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let test_fn = instance
+        .get_typed_func::<(), i32>(&mut store, "test_multiple_vectors")
+        .expect("test_multiple_vectors not found");
+
+    // len1=3, len2=2: 3*10 + 2 = 32
+    let result = test_fn.call(&mut store, ()).expect("call failed");
+    assert_eq!(result, 32, "Should return 3*10 + 2 = 32");
+}

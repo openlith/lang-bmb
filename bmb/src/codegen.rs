@@ -695,30 +695,67 @@ impl CodeGenerator {
             }
 
             Opcode::Xcall => {
-                // xcall function_name args...
-                // External call to void function (no return value)
-                // First operand is function name, rest are arguments
-                let func_name = match &stmt.operands[0] {
-                    Operand::Identifier(id) => &id.name,
+                // External call: supports both void and non-void returns
+                // Syntax 1 (void): xcall func_name %args...
+                // Syntax 2 (non-void): xcall %dest func_name %args...
+                match &stmt.operands[0] {
+                    Operand::Register(dest_reg) => {
+                        // Non-void xcall: xcall %dest func_name %args...
+                        let func_name = match &stmt.operands[1] {
+                            Operand::Identifier(id) => id.name.clone(),
+                            Operand::QualifiedIdent { module, name } => {
+                                format!("{}::{}", module.name, name.name)
+                            }
+                            _ => {
+                                return Err(BmbError::CodegenError {
+                                    message: "xcall requires function name".to_string(),
+                                })
+                            }
+                        };
+
+                        // Push arguments (operands 2..)
+                        for operand in stmt.operands.iter().skip(2) {
+                            self.generate_operand(operand, func, ctx)?;
+                        }
+
+                        // Call function
+                        if let Some(&func_idx) = ctx.function_indices.get(&func_name) {
+                            func.instruction(&Instruction::Call(func_idx));
+                        } else {
+                            return Err(BmbError::CodegenError {
+                                message: format!("Unknown function: {}", func_name),
+                            });
+                        }
+
+                        // Store return value in destination register
+                        if let Some(&idx) = ctx.locals.get(&dest_reg.name) {
+                            func.instruction(&Instruction::LocalSet(idx));
+                        }
+                    }
+                    Operand::Identifier(id) => {
+                        // Void xcall: xcall func_name %args...
+                        let func_name = &id.name;
+
+                        // Push arguments (operands 1..)
+                        for operand in stmt.operands.iter().skip(1) {
+                            self.generate_operand(operand, func, ctx)?;
+                        }
+
+                        // Call function (no return value to store)
+                        if let Some(&func_idx) = ctx.function_indices.get(func_name) {
+                            func.instruction(&Instruction::Call(func_idx));
+                        } else {
+                            return Err(BmbError::CodegenError {
+                                message: format!("Unknown function: {}", func_name),
+                            });
+                        }
+                    }
                     _ => {
                         return Err(BmbError::CodegenError {
-                            message: "Xcall requires function name".to_string(),
+                            message: "xcall first operand must be register or function name"
+                                .to_string(),
                         })
                     }
-                };
-
-                // Push arguments (operands 1..)
-                for operand in stmt.operands.iter().skip(1) {
-                    self.generate_operand(operand, func, ctx)?;
-                }
-
-                // Call function (no return value to store)
-                if let Some(&func_idx) = ctx.function_indices.get(func_name) {
-                    func.instruction(&Instruction::Call(func_idx));
-                } else {
-                    return Err(BmbError::CodegenError {
-                        message: format!("Unknown function: {}", func_name),
-                    });
                 }
             }
 
@@ -1691,25 +1728,60 @@ impl CodeGenerator {
                 }
             }
             Opcode::Xcall => {
-                let func_name = match &stmt.operands[0] {
-                    Operand::Identifier(id) => &id.name,
+                // External call in match arms: supports both void and non-void returns
+                match &stmt.operands[0] {
+                    Operand::Register(dest_reg) => {
+                        // Non-void xcall: xcall %dest func_name %args...
+                        let func_name = match &stmt.operands[1] {
+                            Operand::Identifier(id) => id.name.clone(),
+                            Operand::QualifiedIdent { module, name } => {
+                                format!("{}::{}", module.name, name.name)
+                            }
+                            _ => {
+                                return Err(BmbError::CodegenError {
+                                    message: "xcall requires function name".to_string(),
+                                })
+                            }
+                        };
+
+                        for operand in stmt.operands.iter().skip(2) {
+                            self.generate_operand(operand, func, ctx)?;
+                        }
+
+                        if let Some(&func_idx) = ctx.function_indices.get(&func_name) {
+                            func.instruction(&Instruction::Call(func_idx));
+                        } else {
+                            return Err(BmbError::CodegenError {
+                                message: format!("Unknown function: {}", func_name),
+                            });
+                        }
+
+                        if let Some(&idx) = ctx.locals.get(&dest_reg.name) {
+                            func.instruction(&Instruction::LocalSet(idx));
+                        }
+                    }
+                    Operand::Identifier(id) => {
+                        // Void xcall: xcall func_name %args...
+                        let func_name = &id.name;
+
+                        for operand in stmt.operands.iter().skip(1) {
+                            self.generate_operand(operand, func, ctx)?;
+                        }
+
+                        if let Some(&func_idx) = ctx.function_indices.get(func_name) {
+                            func.instruction(&Instruction::Call(func_idx));
+                        } else {
+                            return Err(BmbError::CodegenError {
+                                message: format!("Unknown function: {}", func_name),
+                            });
+                        }
+                    }
                     _ => {
                         return Err(BmbError::CodegenError {
-                            message: "Xcall requires function name".to_string(),
+                            message: "xcall first operand must be register or function name"
+                                .to_string(),
                         })
                     }
-                };
-
-                for operand in stmt.operands.iter().skip(1) {
-                    self.generate_operand(operand, func, ctx)?;
-                }
-
-                if let Some(&func_idx) = ctx.function_indices.get(func_name) {
-                    func.instruction(&Instruction::Call(func_idx));
-                } else {
-                    return Err(BmbError::CodegenError {
-                        message: format!("Unknown function: {}", func_name),
-                    });
                 }
             }
             Opcode::Jmp | Opcode::Jif => {

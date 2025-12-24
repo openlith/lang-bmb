@@ -1070,22 +1070,57 @@ fn typecheck_statement(
         }
 
         Opcode::Xcall => {
-            // External call to void function: xcall func %args...
+            // External call: supports both void and non-void returns
+            // Syntax 1 (void): xcall func_name %args...
+            // Syntax 2 (non-void): xcall %dest func_name %args...
             if stmt.operands.is_empty() {
                 return Err(BmbError::TypeError {
                     message: "xcall requires at least 1 operand (function name)".to_string(),
                 });
             }
 
-            // First operand is function name
-            if let Operand::Identifier(ref func) = stmt.operands[0] {
-                if env.get_function(&func.name).is_none() {
+            // Check if first operand is register (non-void) or identifier (void)
+            match &stmt.operands[0] {
+                Operand::Register(ref dest_reg) => {
+                    // Non-void xcall: xcall %dest func_name %args...
+                    if stmt.operands.len() < 2 {
+                        return Err(BmbError::TypeError {
+                            message: "xcall with destination requires function name".to_string(),
+                        });
+                    }
+                    let func_name = match &stmt.operands[1] {
+                        Operand::Identifier(func) => func.name.clone(),
+                        Operand::QualifiedIdent { module, name } => {
+                            format!("{}::{}", module.name, name.name)
+                        }
+                        _ => {
+                            return Err(BmbError::TypeError {
+                                message: "xcall requires function name as second operand".to_string(),
+                            });
+                        }
+                    };
+                    if let Some(sig) = env.get_function(&func_name) {
+                        env.add_register(&dest_reg.name, sig.returns.clone());
+                    } else {
+                        return Err(BmbError::TypeError {
+                            message: format!("Unknown function: {}", func_name),
+                        });
+                    }
+                }
+                Operand::Identifier(ref func) => {
+                    // Void xcall: xcall func_name %args...
+                    if env.get_function(&func.name).is_none() {
+                        return Err(BmbError::TypeError {
+                            message: format!("Unknown function: {}", func.name),
+                        });
+                    }
+                }
+                _ => {
                     return Err(BmbError::TypeError {
-                        message: format!("Unknown function: {}", func.name),
+                        message: "xcall first operand must be register or function name".to_string(),
                     });
                 }
             }
-            // No result register - void function
         }
 
         Opcode::Mov => {
