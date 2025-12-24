@@ -2633,3 +2633,341 @@ fn test_exhaustiveness_all_enum_variants_no_default() {
     assert_eq!(direction_code.call(&mut store, 2).unwrap(), 2);  // East
     assert_eq!(direction_code.call(&mut store, 3).unwrap(), 3);  // West
 }
+
+// =============================================================================
+// Module & FFI Execution Tests (v0.15.2)
+// =============================================================================
+
+#[test]
+fn test_xcall_executes_host_function() {
+    // v0.15.2: Verify xcall actually invokes the host function at runtime
+    // This test uses wasmtime's Linker to provide host functions
+    use std::sync::{Arc, Mutex};
+
+    let source = r#"
+# External function declaration
+@extern "C" from "test_host"
+@node accumulate
+@params value:i32
+@returns void
+
+# Main function that calls the extern
+@node main
+@params x:i32
+@returns i32
+  xcall accumulate %x
+  xcall accumulate %x
+  xcall accumulate %x
+  ret %x
+"#;
+
+    // Compile to WASM
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    // Create engine and store with shared state
+    let engine = Engine::default();
+    let call_count = Arc::new(Mutex::new(0i32));
+    let accumulated = Arc::new(Mutex::new(0i32));
+
+    // Clone for closure
+    let call_count_clone = call_count.clone();
+    let accumulated_clone = accumulated.clone();
+
+    // Create linker and register host function
+    let mut linker = Linker::new(&engine);
+    linker
+        .func_wrap("test_host", "accumulate", move |value: i32| {
+            *call_count_clone.lock().unwrap() += 1;
+            *accumulated_clone.lock().unwrap() += value;
+        })
+        .expect("failed to register host function");
+
+    // Create module and instantiate with linked functions
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    // Call main with value 10
+    let main = instance
+        .get_typed_func::<i32, i32>(&mut store, "main")
+        .expect("main function not found");
+
+    let result = main.call(&mut store, 10).expect("call failed");
+
+    // Verify host function was called 3 times
+    assert_eq!(*call_count.lock().unwrap(), 3, "xcall should invoke host function 3 times");
+
+    // Verify accumulated value (10 + 10 + 10 = 30)
+    assert_eq!(*accumulated.lock().unwrap(), 30, "accumulated value should be 30");
+
+    // Return value should be the input unchanged
+    assert_eq!(result, 10);
+}
+
+#[test]
+fn test_xcall_with_multiple_extern_functions() {
+    // v0.15.2: Test multiple extern functions from different modules
+    use std::sync::{Arc, Mutex};
+
+    let source = r#"
+# Logger from logger module
+@extern "C" from "logger"
+@node log_info
+@params code:i32
+@returns void
+
+# Metrics from metrics module
+@extern "C" from "metrics"
+@node record_metric
+@params value:i32
+@returns void
+
+@node process
+@params input:i32
+@returns i32
+  xcall log_info 100
+  mul %doubled input 2
+  xcall record_metric %doubled
+  xcall log_info 200
+  ret %doubled
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    let engine = Engine::default();
+    let log_calls = Arc::new(Mutex::new(Vec::<i32>::new()));
+    let metric_calls = Arc::new(Mutex::new(Vec::<i32>::new()));
+
+    let log_calls_clone = log_calls.clone();
+    let metric_calls_clone = metric_calls.clone();
+
+    let mut linker = Linker::new(&engine);
+    linker
+        .func_wrap("logger", "log_info", move |code: i32| {
+            log_calls_clone.lock().unwrap().push(code);
+        })
+        .expect("failed to register log_info");
+
+    linker
+        .func_wrap("metrics", "record_metric", move |value: i32| {
+            metric_calls_clone.lock().unwrap().push(value);
+        })
+        .expect("failed to register record_metric");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let process = instance
+        .get_typed_func::<i32, i32>(&mut store, "process")
+        .expect("process function not found");
+
+    let result = process.call(&mut store, 5).expect("call failed");
+
+    // Verify log calls: 100, 200
+    assert_eq!(*log_calls.lock().unwrap(), vec![100, 200], "log_info should be called with 100 then 200");
+
+    // Verify metric call: 10 (5 * 2)
+    assert_eq!(*metric_calls.lock().unwrap(), vec![10], "record_metric should be called with 10");
+
+    // Return value should be doubled
+    assert_eq!(result, 10);
+}
+
+#[test]
+fn test_call_with_extern_function_returning_value() {
+    // v0.15.2: Test extern function that returns a value (using call, not xcall)
+    // call is for functions that return values, xcall is for void functions
+
+    let source = r#"
+# External function that returns a value
+@extern "C" from "math_host"
+@node double_it
+@params x:i32
+@returns i32
+
+@node compute
+@params input:i32
+@returns i32
+  call %result double_it input
+  add %final %result 1
+  ret %final
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let verified = contracts::verify(&typed).expect("contract verification failed");
+    let wasm = codegen::generate(&verified).expect("code generation failed");
+
+    let engine = Engine::default();
+
+    let mut linker = Linker::new(&engine);
+    linker
+        .func_wrap("math_host", "double_it", |x: i32| -> i32 {
+            x * 2
+        })
+        .expect("failed to register double_it");
+
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = linker.instantiate(&mut store, &module).expect("instantiation failed");
+
+    let compute = instance
+        .get_typed_func::<i32, i32>(&mut store, "compute")
+        .expect("compute function not found");
+
+    // compute(5) = double_it(5) + 1 = 10 + 1 = 11
+    let result = compute.call(&mut store, 5).expect("call failed");
+    assert_eq!(result, 11);
+
+    // compute(10) = double_it(10) + 1 = 20 + 1 = 21
+    let result = compute.call(&mut store, 10).expect("call failed");
+    assert_eq!(result, 21);
+}
+
+#[test]
+fn test_qualified_call_in_single_file() {
+    // v0.15.2: Test that qualified call syntax parses correctly
+    // This registers both the caller and target in the same file
+
+    // Note: In single-file compilation, qualified calls require
+    // the target function to be registered with that qualified name.
+    // For now, we test the internal call path (same file).
+
+    let source = r#"
+# Helper function
+@node helper
+@params x:i32
+@returns i32
+  mul %r x 2
+  ret %r
+
+# Main function that calls helper (unqualified, same file)
+@node main_caller
+@params input:i32
+@returns i32
+  call %result helper input
+  add %final %result 100
+  ret %final
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let main_caller = instance
+        .get_typed_func::<i32, i32>(&mut store, "main_caller")
+        .expect("main_caller function not found");
+
+    // main_caller(5) = helper(5) + 100 = 10 + 100 = 110
+    let result = main_caller.call(&mut store, 5).expect("call failed");
+    assert_eq!(result, 110);
+}
+
+#[test]
+fn test_modules_merged_program_qualified_lookup() {
+    // v0.15.2: Test MergedProgram qualified node lookup
+    use bmb::modules::{MergedProgram, ResolvedModule};
+    use std::path::PathBuf;
+    use bmb::ast::{Type, Program, Node, Identifier, Span, Parameter, ParamAnnotation};
+
+    // Create main program
+    let main = Program {
+        module: None,
+        imports: vec![],
+        uses: vec![],
+        extern_defs: vec![],
+        type_defs: vec![],
+        structs: vec![],
+        enums: vec![],
+        contracts: vec![],
+        device_defs: vec![],
+        nodes: vec![Node {
+            is_public: false,
+            name: Identifier::new("main", Span::default()),
+            tags: vec![],
+            params: vec![],
+            returns: Type::I32,
+            preconditions: vec![],
+            postconditions: vec![],
+            invariants: vec![],
+            variants: vec![],
+            pure: false,
+            requires: vec![],
+            assertions: vec![],
+            tests: vec![],
+            body: vec![],
+            span: Span::default(),
+        }],
+    };
+
+    // Create math module with add function
+    let math_module = ResolvedModule {
+        path: PathBuf::from("math.bmb"),
+        program: Program {
+            module: None,
+            imports: vec![],
+            uses: vec![],
+            extern_defs: vec![],
+            type_defs: vec![],
+            structs: vec![],
+            enums: vec![],
+            contracts: vec![],
+            device_defs: vec![],
+            nodes: vec![Node {
+                is_public: false,
+                name: Identifier::new("adder", Span::default()),
+                tags: vec![],
+                params: vec![
+                    Parameter {
+                        name: Identifier::new("a", Span::default()),
+                        ty: Type::I32,
+                        annotation: ParamAnnotation::None,
+                        span: Span::default(),
+                    },
+                    Parameter {
+                        name: Identifier::new("b", Span::default()),
+                        ty: Type::I32,
+                        annotation: ParamAnnotation::None,
+                        span: Span::default(),
+                    },
+                ],
+                returns: Type::I32,
+                preconditions: vec![],
+                postconditions: vec![],
+                invariants: vec![],
+                variants: vec![],
+                pure: false,
+                requires: vec![],
+                assertions: vec![],
+                tests: vec![],
+                body: vec![],
+                span: Span::default(),
+            }],
+        },
+        alias: None,
+    };
+
+    let mut modules = std::collections::HashMap::new();
+    modules.insert("math".to_string(), math_module);
+
+    let merged = MergedProgram::new(main, modules);
+
+    // Test qualified lookup
+    assert!(merged.get_node("main").is_some(), "main node should be found");
+    assert!(merged.get_node("math::adder").is_some(), "math::adder should be found");
+    assert!(merged.get_qualified_node("math", "adder").is_some(), "qualified lookup should work");
+
+    // Test that wrong lookups return None
+    assert!(merged.get_node("nonexistent").is_none());
+    assert!(merged.get_node("other::adder").is_none());
+}
