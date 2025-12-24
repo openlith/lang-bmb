@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2025-12-24
+
+### Added
+
+#### Self-Hosting Preparation
+- **Box<T> Heap Allocation**: Complete heap allocation with bump allocator
+  - `box %ptr %value` - Allocate and store value on heap
+  - `unbox %dest %ptr` - Load value from heap pointer
+  - `drop %ptr` - Deallocate heap memory
+  - WASM linear memory integration with 64KB initial heap
+- **Enhanced Source Location Tracking**: Multi-line span support
+  - `end_line`, `end_column`, `file_id` fields in Span
+  - `SourceFile` struct for multi-file compilation
+  - `get_line()`, `get_snippet()` methods for error context
+- **Error Accumulation Pattern**: Collect multiple diagnostics
+  - `ErrorCollector` struct with push/merge/check methods
+  - `into_result()` and `into_combined_result()` for batch processing
+  - Supports both errors and warnings
+
+#### Standard Library
+- **File I/O Module** (`stdlib/io.bmb`): Host-imported I/O functions
+  - `io_open`, `io_read`, `io_write`, `io_close`
+  - `io_size`, `io_seek`, `io_exists`, `io_flush`
+  - Standard error codes (-1 to -6)
+- **Host Implementation** (`src/host/io.rs`): Reference implementation
+  - `FileTable` for managing file descriptors
+  - `IoError`, `OpenMode`, `SeekWhence` enums
+  - Thread-safe `SharedFileTable` wrapper
+
+#### CLI Infrastructure
+- **Platform-Independent Argument Parser** (`src/cli/`):
+  - `ArgParser` builder for configuring expected arguments
+  - Short (-v) and long (--verbose) option support
+  - Multi-value options (-I path1 -I path2)
+  - Subcommand parsing with trailing argument separator (--)
+  - `CompileArgs`, `CheckArgs`, `RunArgs` structured types
+  - `OutputFormat`, `VerifyLevel`, `OptLevel` enums with parsing
+
+### Changed
+- Grammar: Added negative lookahead to prevent operand rule matching opcodes
+- Span: Now tracks full range with start/end positions
+
+### Fixed
+- Box<T> operand parsing: Grammar fix prevents opcode keywords from being matched as identifiers
+
+
 ## [0.2.0] - 2025-12-21
 
 ### Added
@@ -101,6 +147,7 @@ BMB follows [Semantic Versioning](https://semver.org/):
 | 1 | Bronze | Type safety |
 | 2 | Silver | Contract verification (runtime) |
 
-[Unreleased]: https://github.com/openlith/lang-bmb/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/openlith/lang-bmb/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/openlith/lang-bmb/compare/v0.2.0...v0.13.0
 [0.2.0]: https://github.com/openlith/lang-bmb/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/openlith/lang-bmb/releases/tag/v0.1.0
