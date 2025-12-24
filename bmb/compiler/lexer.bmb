@@ -344,3 +344,102 @@ _at:
 # State is passed as separate parameters until BMB supports mutable structs.
 # Parameters: source (handle), pos, line, col, token_start
 # ============================================
+
+# ============================================
+# Token Scanning
+# ============================================
+
+# scan_single_char_token: Try to scan a single-character token
+# Returns: (token_kind << 16) | new_pos if matched, -1 if not matched
+# Using packed return: high 16 bits = token kind, low 16 bits = new position
+@node scan_single_char_token
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  lt %is_eof %ch 0
+  jif %is_eof _not_matched
+  call %kind get_single_char_token %ch
+  lt %not_single %kind 0
+  jif %not_single _not_matched
+  # Matched! Pack (kind << 16) | (pos + 1)
+  mul %kind_shifted %kind 65536
+  add %new_pos pos 1
+  add %result %kind_shifted %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# unpack_token_kind: Extract token kind from packed result
+@node unpack_token_kind
+@params packed:i32
+@returns i32
+@pre packed >= 0
+@post ret >= 0
+  div %kind packed 65536
+  ret %kind
+
+# unpack_position: Extract position from packed result
+@node unpack_position
+@params packed:i32
+@returns i32
+@pre packed >= 0
+@post ret >= 0
+  mod %pos packed 65536
+  ret %pos
+
+# scan_token: Main token scanning entry point
+# Returns packed result: (kind << 16) | new_pos, or (EOF << 16) | pos at end
+@node scan_token
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= 0
+  # Skip leading whitespace (but not newlines - they are significant)
+  call %check_end is_at_end source pos
+  ne %at_end %check_end 0
+  jif %at_end _eof
+
+  # Check for newline (TokenKind::Newline = 78)
+  call %ch peek source pos
+  eq %is_newline %ch 10
+  jif %is_newline _newline
+
+  # Skip non-newline whitespace
+  xcall %is_ws is_whitespace %ch
+  ne %ws_bool %is_ws 0
+  jif %ws_bool _skip_ws
+
+  # Try single-char token
+  call %single_result scan_single_char_token source pos
+  ge %single_matched %single_result 0
+  jif %single_matched _return_single
+
+  # Not a single-char token - will be handled by other phases
+  # For now, return Error token and advance
+  mul %err_kind 105 65536
+  add %new_pos pos 1
+  add %result %err_kind %new_pos
+  ret %result
+
+_skip_ws:
+  add %ws_pos pos 1
+  call %result scan_token source %ws_pos
+  ret %result
+
+_newline:
+  mul %nl_kind 78 65536
+  add %nl_pos pos 1
+  add %result %nl_kind %nl_pos
+  ret %result
+
+_return_single:
+  ret %single_result
+
+_eof:
+  # EOF token = 79
+  mul %eof_kind 79 65536
+  add %result %eof_kind pos
+  ret %result
