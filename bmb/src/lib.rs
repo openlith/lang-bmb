@@ -46,6 +46,9 @@ pub mod cli;
 /// Contract inference for boilerplate reduction (v0.14+)
 pub mod suggest;
 
+/// Exhaustiveness checking for pattern matching (v0.15+)
+pub mod exhaustiveness;
+
 use thiserror::Error;
 
 pub use error::{Diagnostic, ErrorCode};

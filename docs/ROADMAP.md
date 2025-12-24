@@ -775,18 +775,18 @@ Type-level invariants automatically applied at function boundaries.
 
 ---
 
-## v0.15.0: Pattern Matching & AST Structures
+## v0.15.0: Pattern Matching & AST Structures ✅ COMPLETE
 
 **Goal**: Language features needed for compiler implementation
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| `@match` expression syntax | Critical | High |
-| Exhaustiveness checking | Critical | High |
-| AST enum definitions | Critical | Medium |
-| Recursive data structures | High | Medium |
-| Tree traversal patterns | High | Medium |
-| String operations (concat, split) | High | Medium |
+| Task | Priority | Status |
+|------|----------|--------|
+| `@match` expression syntax | Critical | ✅ Complete (v0.13) |
+| Exhaustiveness checking | Critical | ✅ Complete |
+| AST enum definitions | Critical | ✅ Complete (v0.13) |
+| Recursive data structures | High | ✅ Complete (Box<T> v0.13) |
+| Tree traversal patterns | High | Pattern match supports |
+| String operations (concat, split) | High | Deferred to v0.15.1 |
 
 ### Pattern Matching
 
@@ -1460,6 +1460,8 @@ Example: Array access
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 15.0 | 2025-12-24 | v0.15.0 Complete: Exhaustiveness checking for pattern matching (Maranget-style usefulness algorithm), integration tests for non-exhaustive patterns, example BMB programs for @match. String operations deferred to v0.15.1. |
+| 14.0 | 2025-12-24 | v0.14.0 Complete: Contract Inference system with frame analysis (@modifies) and postcondition suggestions. Boilerplate reduction through intelligent inference. |
 | 13.0 | 2025-12-24 | v0.13.0 Complete: Box<T>/unbox/drop opcodes, enhanced Span, ErrorCollector, File I/O abstraction, CLI argument parser. **Roadmap restructured**: Added v0.14 (Contract Inference), v0.15 (Pattern Matching), v0.16-v0.18 (Self-Hosting phases). Bronze→v0.19-v0.21, Silver→v0.22-v0.24, Gold→v0.25-v0.27. Added Boilerplate Reduction Strategy section. |
 | 12.1 | 2025-12-24 | Bronze Stage reorganized: Contract-Propagating Monomorphic Generics integrated (v0.16 Parametric Data Types, v0.17 Generic Functions, v0.18 Bounded Generics) |
 | 12.0 | 2025-12-24 | v0.12.0 Complete: @extern FFI with calling conventions, @pub visibility annotation, WASM import modules |

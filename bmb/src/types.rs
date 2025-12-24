@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
+use crate::exhaustiveness::{check_exhaustiveness, format_missing_patterns};
 use crate::{BmbError, Result};
 
 /// Registry for user-defined types (structs, enums, and refined types)
@@ -630,6 +631,28 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) ->
                             typecheck_statement(stmt, &mut env, &node.returns, registry)?;
                         }
                     }
+                }
+
+                // Exhaustiveness check (v0.15+)
+                // "Omission is guessing, and guessing is error."
+                let exhaustiveness_result =
+                    check_exhaustiveness(match_stmt, &scrutinee_type, registry)?;
+
+                if !exhaustiveness_result.is_exhaustive {
+                    return Err(BmbError::TypeError {
+                        message: format!(
+                            "Non-exhaustive pattern match on %{}: {}",
+                            match_stmt.scrutinee,
+                            format_missing_patterns(&exhaustiveness_result.missing_patterns)
+                        ),
+                    });
+                }
+
+                // Warn about unreachable patterns (currently as error for strictness)
+                if !exhaustiveness_result.unreachable_patterns.is_empty() {
+                    // For now, unreachable patterns are warnings, not errors
+                    // In the future, this could be configurable
+                    // eprintln!("Warning: {}", format_unreachable_patterns(&exhaustiveness_result.unreachable_patterns));
                 }
             }
         }

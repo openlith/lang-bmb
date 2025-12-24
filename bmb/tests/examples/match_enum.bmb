@@ -1,0 +1,57 @@
+# Pattern Matching with Enum Types
+# Demonstrates exhaustive pattern matching - "Omission is guessing, and guessing is error."
+#
+# BMB requires all enum variants to be covered explicitly,
+# or use @default to handle remaining cases.
+
+@enum HttpStatus
+  Ok
+  NotFound
+  ServerError
+  Unauthorized
+
+# Map HTTP status to numeric code
+# Exhaustive: all variants handled explicitly
+@node status_code
+@params status:HttpStatus
+@returns i32
+
+  @match %status
+    @case HttpStatus::Ok:
+      ret 200
+    @case HttpStatus::NotFound:
+      ret 404
+    @case HttpStatus::ServerError:
+      ret 500
+    @case HttpStatus::Unauthorized:
+      ret 401
+
+# Check if status indicates success
+# Partial coverage with @default
+# Note: BMB returns 1/0 for bool (WASM i32 representation)
+@node is_success
+@params status:HttpStatus
+@returns i32
+
+  @match %status
+    @case HttpStatus::Ok:
+      ret 1
+    @default:
+      ret 0
+
+# Priority-based status handling
+# Only Ok is handled specifically; others fall through to default
+@node get_priority
+@params status:HttpStatus
+@returns i32
+@post ret >= 0
+
+  @match %status
+    @case HttpStatus::ServerError:
+      ret 10
+    @case HttpStatus::Unauthorized:
+      ret 5
+    @case HttpStatus::NotFound:
+      ret 2
+    @case HttpStatus::Ok:
+      ret 0

@@ -2296,3 +2296,188 @@ fn test_box_returns_pointer() {
     let ptr = box_ptr.call(&mut store, 42).unwrap();
     assert!(ptr >= 1024, "Box pointer should be >= 1024, got {}", ptr);
 }
+
+// =============================================================================
+// Exhaustiveness Checking Tests (v0.15+)
+// "Omission is guessing, and guessing is error."
+// =============================================================================
+
+#[test]
+fn test_exhaustiveness_enum_missing_variant() {
+    // Test that missing enum variant causes compile error
+    let source = r#"
+@enum Status
+  Ok
+  Err
+  Pending
+
+@node process
+@params s:Status
+@returns i32
+
+  @match %s
+    @case Status::Ok:
+      ret 1
+    @case Status::Err:
+      ret 0
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let result = types::typecheck(&ast);
+
+    assert!(result.is_err(), "Should fail: missing Status::Pending variant");
+    let err = result.unwrap_err();
+    let err_msg = format!("{}", err);
+    assert!(
+        err_msg.contains("Non-exhaustive") || err_msg.contains("Missing pattern"),
+        "Error should mention non-exhaustive: {}",
+        err_msg
+    );
+    assert!(
+        err_msg.contains("Pending"),
+        "Error should mention missing 'Pending' variant: {}",
+        err_msg
+    );
+}
+
+#[test]
+fn test_exhaustiveness_bool_missing_false() {
+    // Test that missing 'false' pattern causes compile error
+    let source = r#"
+@node only_true
+@params b:bool
+@returns i32
+
+  @match %b
+    @case true:
+      ret 1
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let result = types::typecheck(&ast);
+
+    assert!(result.is_err(), "Should fail: missing 'false' pattern");
+    let err = result.unwrap_err();
+    let err_msg = format!("{}", err);
+    assert!(
+        err_msg.contains("Non-exhaustive") || err_msg.contains("Missing pattern"),
+        "Error should mention non-exhaustive: {}",
+        err_msg
+    );
+    assert!(
+        err_msg.contains("false"),
+        "Error should mention missing 'false': {}",
+        err_msg
+    );
+}
+
+#[test]
+fn test_exhaustiveness_integer_requires_default() {
+    // Test that integer match without @default causes compile error
+    let source = r#"
+@node classify
+@params x:i32
+@returns i32
+
+  @match %x
+    @case 0:
+      ret 100
+    @case 1:
+      ret 200
+"#;
+
+    let ast = parser::parse(source).expect("parsing failed");
+    let result = types::typecheck(&ast);
+
+    assert!(result.is_err(), "Should fail: integer domain requires @default");
+    let err = result.unwrap_err();
+    let err_msg = format!("{}", err);
+    assert!(
+        err_msg.contains("Non-exhaustive") || err_msg.contains("Missing pattern"),
+        "Error should mention non-exhaustive: {}",
+        err_msg
+    );
+    assert!(
+        err_msg.contains("@default"),
+        "Error should mention missing '@default': {}",
+        err_msg
+    );
+}
+
+#[test]
+fn test_exhaustiveness_enum_with_default_is_ok() {
+    // Test that partial enum coverage with @default compiles
+    let source = r#"
+@enum Status
+  Ok
+  Err
+  Pending
+
+@node process
+@params s:Status
+@returns i32
+
+  @match %s
+    @case Status::Ok:
+      ret 1
+    @default:
+      ret 0
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let process = instance
+        .get_typed_func::<i32, i32>(&mut store, "process")
+        .expect("process function not found");
+
+    assert_eq!(process.call(&mut store, 0).unwrap(), 1);  // Ok
+    assert_eq!(process.call(&mut store, 1).unwrap(), 0);  // Err -> default
+    assert_eq!(process.call(&mut store, 2).unwrap(), 0);  // Pending -> default
+}
+
+#[test]
+fn test_exhaustiveness_all_enum_variants_no_default() {
+    // Test that covering all variants without @default compiles
+    let source = r#"
+@enum Direction
+  North
+  South
+  East
+  West
+
+@node direction_code
+@params d:Direction
+@returns i32
+
+  @match %d
+    @case Direction::North:
+      ret 0
+    @case Direction::South:
+      ret 1
+    @case Direction::East:
+      ret 2
+    @case Direction::West:
+      ret 3
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let direction_code = instance
+        .get_typed_func::<i32, i32>(&mut store, "direction_code")
+        .expect("direction_code function not found");
+
+    assert_eq!(direction_code.call(&mut store, 0).unwrap(), 0);  // North
+    assert_eq!(direction_code.call(&mut store, 1).unwrap(), 1);  // South
+    assert_eq!(direction_code.call(&mut store, 2).unwrap(), 2);  // East
+    assert_eq!(direction_code.call(&mut store, 3).unwrap(), 3);  // West
+}
