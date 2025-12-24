@@ -40,6 +40,9 @@ pub mod x64;
 /// Host interface helpers for WASM runtime environments (v0.13+)
 pub mod host;
 
+/// CLI argument parsing abstraction for self-hosting (v0.13+)
+pub mod cli;
+
 use thiserror::Error;
 
 pub use error::{Diagnostic, ErrorCode};
