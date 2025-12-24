@@ -1,0 +1,149 @@
+# BMB Self-Hosting Compiler - Token Definitions
+# v0.16.0: Lexer & Tokenizer in BMB
+#
+# Philosophy: "Omission is guessing, and guessing is error"
+# Each token type is explicit; no implicit conversions.
+
+# TokenKind - Enumeration of all token types
+# Simple variants for keywords/operators, data variants for values
+@enum TokenKind
+  # === Keywords (BMB directives) ===
+  KwNode            # @node
+  KwParams          # @params
+  KwReturns         # @returns
+  KwPre             # @pre
+  KwPost            # @post
+  KwInvariant       # @invariant
+  KwVariant         # @variant
+  KwPure            # @pure
+  KwRequires        # @requires
+  KwContract        # @contract
+  KwType            # @type
+  KwStruct          # @struct
+  KwEnum            # @enum
+  KwMatch           # @match
+  KwCase            # @case
+  KwExtern          # @extern
+  KwUse             # @use
+  KwPub             # @pub
+
+  # === Opcodes ===
+  OpMov             # mov
+  OpAdd             # add
+  OpSub             # sub
+  OpMul             # mul
+  OpDiv             # div
+  OpMod             # mod
+  OpAnd             # and
+  OpOr              # or
+  OpXor             # xor
+  OpNot             # not
+  OpShl             # shl
+  OpShr             # shr
+  OpEq              # eq
+  OpNe              # ne
+  OpLt              # lt
+  OpLe              # le
+  OpGt              # gt
+  OpGe              # ge
+  OpJmp             # jmp
+  OpJif             # jif
+  OpRet             # ret
+  OpCall            # call
+  OpXcall           # xcall
+  OpLoad            # load
+  OpStore           # store
+  OpBox             # box
+  OpUnbox           # unbox
+  OpDrop            # drop
+  OpPrint           # print
+
+  # === Punctuation ===
+  At                # @
+  Colon             # :
+  Percent           # % (register prefix)
+  LParen            # (
+  RParen            # )
+  LBracket          # [
+  RBracket          # ]
+  LBrace            # {
+  RBrace            # }
+  Comma             # ,
+  Arrow             # =>
+  ColonColon        # ::
+  Underscore        # _
+
+  # === Operators (for expressions) ===
+  Plus              # +
+  Minus             # -
+  Star              # *
+  Slash             # /
+  Ampersand         # &
+  Pipe              # |
+  Caret             # ^
+  EqEq              # ==
+  BangEq            # !=
+  LtOp              # <
+  LeOp              # <=
+  GtOp              # >
+  GeOp              # >=
+
+  # === Literals (with payload) ===
+  IntLit: i64       # Integer literal value
+  FloatLit: i64     # Float literal (as bits for now)
+  StringLit: i32    # String handle
+
+  # === Identifiers ===
+  Ident: i32        # Identifier (string handle)
+  Register: i32     # Register name (%foo) (string handle)
+  Label: i32        # Label (_foo:) (string handle)
+
+  # === Special ===
+  Newline           # End of line (significant in BMB)
+  Comment           # # comment (can be filtered)
+  Eof               # End of file
+  Error: i32        # Error message (string handle)
+
+# Token - A token with its kind and source position
+@struct Token
+  kind: TokenKind
+  line: i32
+  column: i32
+  start: i32        # Byte offset in source
+  len: i32          # Length in bytes
+
+# TokenKind discriminant values (for runtime checks)
+# These match the enum variant order
+
+@node token_kind_is_keyword
+@params kind:i32
+@returns bool
+@pre kind >= 0
+@post true
+  # Keywords are variants 0-17
+  ge %lower kind 0
+  le %upper kind 17
+  and %result %lower %upper
+  ret %result
+
+@node token_kind_is_opcode
+@params kind:i32
+@returns bool
+@pre kind >= 0
+@post true
+  # Opcodes are variants 18-44
+  ge %lower kind 18
+  le %upper kind 44
+  and %result %lower %upper
+  ret %result
+
+@node token_kind_is_punctuation
+@params kind:i32
+@returns bool
+@pre kind >= 0
+@post true
+  # Punctuation is variants 45-57
+  ge %lower kind 45
+  le %upper kind 57
+  and %result %lower %upper
+  ret %result

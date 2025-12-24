@@ -1,0 +1,346 @@
+# BMB Self-Hosting Compiler - Lexer
+# v0.16.0: Lexer & Tokenizer in BMB
+#
+# Philosophy: "Omission is guessing, and guessing is error"
+# Explicit state tracking, no hidden side effects.
+
+@use "token"
+
+# Host function declarations for string operations
+@extern "C" from "bmb_stdlib"
+@node string_len_h
+@params handle:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_get_byte
+@params handle:i32 index:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_new
+@params
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_push_byte
+@params handle:i32 byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node string_drop
+@params handle:i32
+@returns i32
+
+# Host function declarations for character classification
+@extern "C" from "bmb_stdlib"
+@node is_digit
+@params byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node is_alpha
+@params byte:i32
+@returns i32
+
+@extern "C" from "bmb_stdlib"
+@node is_whitespace
+@params byte:i32
+@returns i32
+
+# Lexer state - passed explicitly to all functions
+# (BMB doesn't have mutable structs yet, so we use separate parameters)
+
+# ============================================
+# Character Utilities
+# ============================================
+
+# is_at_end: Check if lexer has reached end of source
+@node is_at_end
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  xcall %len string_len_h source
+  ge %cmp pos %len
+  jif %cmp _yes
+  mov %result 0
+  ret %result
+_yes:
+  mov %result 1
+  ret %result
+
+# peek: Look at current character without consuming
+# Returns -1 if at end
+@node peek
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= -1
+  call %at_end is_at_end source pos
+  ne %at_end_bool %at_end 0
+  jif %at_end_bool _eof
+  xcall %byte string_get_byte source pos
+  ret %byte
+_eof:
+  mov %result -1
+  ret %result
+
+# peek_next: Look at next character (pos+1) without consuming
+# Returns -1 if would be at or past end
+@node peek_next
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= -1
+  add %next_pos pos 1
+  call %at_end is_at_end source %next_pos
+  ne %at_end_bool %at_end 0
+  jif %at_end_bool _eof
+  xcall %byte string_get_byte source %next_pos
+  ret %byte
+_eof:
+  mov %result -1
+  ret %result
+
+# advance: Consume current character and return new position
+# Returns pos+1 if not at end, pos if at end
+@node advance
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= pos
+  call %at_end is_at_end source pos
+  ne %at_end_bool %at_end 0
+  jif %at_end_bool _stay
+  add %new_pos pos 1
+  ret %new_pos
+_stay:
+  ret pos
+
+# skip_whitespace: Skip whitespace characters, return new position
+@node skip_whitespace
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= pos
+  call %at_end is_at_end source pos
+  ne %at_end_bool %at_end 0
+  jif %at_end_bool _done
+  call %ch peek source pos
+  xcall %is_ws is_whitespace %ch
+  eq %not_ws %is_ws 0
+  jif %not_ws _done
+  # Whitespace found, advance and recurse
+  call %new_pos advance source pos
+  call %result skip_whitespace source %new_pos
+  ret %result
+_done:
+  ret pos
+
+# ============================================
+# Character Classification (BMB-specific)
+# ============================================
+
+# is_ident_start: Check if character can start an identifier
+# Identifiers start with alpha or underscore
+@node is_ident_start
+@params byte:i32
+@returns i32
+@pre true
+@post true
+  # Check alpha
+  xcall %is_a is_alpha byte
+  ne %is_alpha_bool %is_a 0
+  jif %is_alpha_bool _yes
+  # Check underscore (95)
+  eq %is_underscore byte 95
+  jif %is_underscore _yes
+  mov %result 0
+  ret %result
+_yes:
+  mov %result 1
+  ret %result
+
+# is_ident_continue: Check if character can continue an identifier
+# Identifiers continue with alphanumeric or underscore
+@node is_ident_continue
+@params byte:i32
+@returns i32
+@pre true
+@post true
+  # Check alpha
+  xcall %is_a is_alpha byte
+  ne %is_alpha_bool %is_a 0
+  jif %is_alpha_bool _yes
+  # Check digit
+  xcall %is_d is_digit byte
+  ne %is_digit_bool %is_d 0
+  jif %is_digit_bool _yes
+  # Check underscore (95)
+  eq %is_underscore byte 95
+  jif %is_underscore _yes
+  mov %result 0
+  ret %result
+_yes:
+  mov %result 1
+  ret %result
+
+# is_hex_digit: Check if character is hexadecimal digit
+@node is_hex_digit
+@params byte:i32
+@returns i32
+@pre true
+@post true
+  # Check 0-9
+  xcall %is_d is_digit byte
+  ne %is_digit_bool %is_d 0
+  jif %is_digit_bool _yes
+  # Check a-f (97-102)
+  ge %ge_a byte 97
+  le %le_f byte 102
+  and %is_lower_hex %ge_a %le_f
+  jif %is_lower_hex _yes
+  # Check A-F (65-70)
+  ge %ge_A byte 65
+  le %le_F byte 70
+  and %is_upper_hex %ge_A %le_F
+  jif %is_upper_hex _yes
+  mov %result 0
+  ret %result
+_yes:
+  mov %result 1
+  ret %result
+
+# ============================================
+# Single Character Token Detection
+# ============================================
+
+# ASCII character codes for reference:
+# '@' = 64, ':' = 58, '%' = 37, '(' = 40, ')' = 41
+# '[' = 91, ']' = 93, '{' = 123, '}' = 125, ',' = 44
+# '+' = 43, '-' = 45, '*' = 42, '/' = 47
+# '=' = 61, '!' = 33, '<' = 60, '>' = 62
+# '&' = 38, '|' = 124, '^' = 94, '_' = 95
+# '#' = 35, '\n' = 10
+
+# get_single_char_token: Map single character to TokenKind
+# Returns -1 if not a single-char token
+@node get_single_char_token
+@params byte:i32
+@returns i32
+@pre byte >= 0
+@post ret >= -1
+  # '@' = 64 -> At (45)
+  eq %is_at byte 64
+  jif %is_at _at
+  # ':' = 58 -> Colon (46)
+  eq %is_colon byte 58
+  jif %is_colon _colon
+  # '%' = 37 -> Percent (47)
+  eq %is_percent byte 37
+  jif %is_percent _percent
+  # '(' = 40 -> LParen (48)
+  eq %is_lparen byte 40
+  jif %is_lparen _lparen
+  # ')' = 41 -> RParen (49)
+  eq %is_rparen byte 41
+  jif %is_rparen _rparen
+  # '[' = 91 -> LBracket (50)
+  eq %is_lbracket byte 91
+  jif %is_lbracket _lbracket
+  # ']' = 93 -> RBracket (51)
+  eq %is_rbracket byte 93
+  jif %is_rbracket _rbracket
+  # '{' = 123 -> LBrace (52)
+  eq %is_lbrace byte 123
+  jif %is_lbrace _lbrace
+  # '}' = 125 -> RBrace (53)
+  eq %is_rbrace byte 125
+  jif %is_rbrace _rbrace
+  # ',' = 44 -> Comma (54)
+  eq %is_comma byte 44
+  jif %is_comma _comma
+  # '+' = 43 -> Plus (58)
+  eq %is_plus byte 43
+  jif %is_plus _plus
+  # '*' = 42 -> Star (60)
+  eq %is_star byte 42
+  jif %is_star _star
+  # '/' = 47 -> Slash (61)
+  eq %is_slash byte 47
+  jif %is_slash _slash
+  # '&' = 38 -> Ampersand (62)
+  eq %is_amp byte 38
+  jif %is_amp _amp
+  # '|' = 124 -> Pipe (63)
+  eq %is_pipe byte 124
+  jif %is_pipe _pipe
+  # '^' = 94 -> Caret (64)
+  eq %is_caret byte 94
+  jif %is_caret _caret
+  # '\n' = 10 -> Newline (78)
+  eq %is_newline byte 10
+  jif %is_newline _newline
+  # Not a single-char token
+  mov %result -1
+  ret %result
+
+  # Labels in reverse order (workaround for label ordering bug)
+_newline:
+  mov %result 78
+  ret %result
+_caret:
+  mov %result 64
+  ret %result
+_pipe:
+  mov %result 63
+  ret %result
+_amp:
+  mov %result 62
+  ret %result
+_slash:
+  mov %result 61
+  ret %result
+_star:
+  mov %result 60
+  ret %result
+_plus:
+  mov %result 58
+  ret %result
+_comma:
+  mov %result 54
+  ret %result
+_rbrace:
+  mov %result 53
+  ret %result
+_lbrace:
+  mov %result 52
+  ret %result
+_rbracket:
+  mov %result 51
+  ret %result
+_lbracket:
+  mov %result 50
+  ret %result
+_rparen:
+  mov %result 49
+  ret %result
+_lparen:
+  mov %result 48
+  ret %result
+_percent:
+  mov %result 47
+  ret %result
+_colon:
+  mov %result 46
+  ret %result
+_at:
+  mov %result 45
+  ret %result
+
+# ============================================
+# Lexer State
+# State is passed as separate parameters until BMB supports mutable structs.
+# Parameters: source (handle), pos, line, col, token_start
+# ============================================

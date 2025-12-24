@@ -7,3 +7,6 @@ CLAUDE.md
 /bmb/target/
 **/*.rs.bk
 Cargo.lock
+
+# Compiled output
+*.wasm
