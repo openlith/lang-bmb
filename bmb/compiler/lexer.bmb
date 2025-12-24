@@ -390,6 +390,214 @@ _not_matched:
   mod %pos packed 65536
   ret %pos
 
+# ============================================
+# Multi-Character Token Scanning
+# ============================================
+
+# ASCII codes: '=' = 61, '!' = 33, '<' = 60, '>' = 62, ':' = 58, '-' = 45
+
+# scan_equals: Handle = and =>  and ==
+# Returns packed result or -1 if not '='
+@node scan_equals
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  ne %not_eq %ch 61
+  jif %not_eq _not_matched
+  call %next peek_next source pos
+  # Check for => (Arrow = 55)
+  eq %is_arrow %next 62
+  jif %is_arrow _arrow
+  # Check for == (EqEq = 65)
+  eq %is_eqeq %next 61
+  jif %is_eqeq _eqeq
+  # Single = is not a token in BMB (use mov opcode)
+  mov %result -1
+  ret %result
+_arrow:
+  mul %kind 55 65536
+  add %new_pos pos 2
+  add %result %kind %new_pos
+  ret %result
+_eqeq:
+  mul %kind 65 65536
+  add %new_pos pos 2
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_bang: Handle ! and !=
+@node scan_bang
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  ne %not_bang %ch 33
+  jif %not_bang _not_matched
+  call %next peek_next source pos
+  # Check for != (BangEq = 66)
+  eq %is_bangeq %next 61
+  jif %is_bangeq _bangeq
+  # Single ! is not used in BMB
+  mov %result -1
+  ret %result
+_bangeq:
+  mul %kind 66 65536
+  add %new_pos pos 2
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_less: Handle < and <=
+@node scan_less
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  ne %not_less %ch 60
+  jif %not_less _not_matched
+  call %next peek_next source pos
+  # Check for <= (LeOp = 68)
+  eq %is_leop %next 61
+  jif %is_leop _leop
+  # Single < (LtOp = 67)
+  mul %kind 67 65536
+  add %new_pos pos 1
+  add %result %kind %new_pos
+  ret %result
+_leop:
+  mul %kind 68 65536
+  add %new_pos pos 2
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_greater: Handle > and >=
+@node scan_greater
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  ne %not_greater %ch 62
+  jif %not_greater _not_matched
+  call %next peek_next source pos
+  # Check for >= (GeOp = 70)
+  eq %is_geop %next 61
+  jif %is_geop _geop
+  # Single > (GtOp = 69)
+  mul %kind 69 65536
+  add %new_pos pos 1
+  add %result %kind %new_pos
+  ret %result
+_geop:
+  mul %kind 70 65536
+  add %new_pos pos 2
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_colon_double: Handle :: (ColonColon = 56)
+# Single : is handled by get_single_char_token
+@node scan_colon_double
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  ne %not_colon %ch 58
+  jif %not_colon _not_matched
+  call %next peek_next source pos
+  eq %is_double %next 58
+  jif %is_double _double
+  mov %result -1
+  ret %result
+_double:
+  mul %kind 56 65536
+  add %new_pos pos 2
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_minus: Handle - (Minus = 59)
+# Note: -> is not used in BMB, we use => for arrows
+@node scan_minus
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  ne %not_minus %ch 45
+  jif %not_minus _not_matched
+  # Simple minus token (Minus = 59)
+  mul %kind 59 65536
+  add %new_pos pos 1
+  add %result %kind %new_pos
+  ret %result
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_multi_char: Try all multi-character token patterns
+@node scan_multi_char
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  # Try :: first (before single :)
+  call %colon_result scan_colon_double source pos
+  ge %colon_matched %colon_result 0
+  jif %colon_matched _return_colon
+  # Try =>  and ==
+  call %eq_result scan_equals source pos
+  ge %eq_matched %eq_result 0
+  jif %eq_matched _return_eq
+  # Try !=
+  call %bang_result scan_bang source pos
+  ge %bang_matched %bang_result 0
+  jif %bang_matched _return_bang
+  # Try < and <=
+  call %less_result scan_less source pos
+  ge %less_matched %less_result 0
+  jif %less_matched _return_less
+  # Try > and >=
+  call %greater_result scan_greater source pos
+  ge %greater_matched %greater_result 0
+  jif %greater_matched _return_greater
+  # Try -
+  call %minus_result scan_minus source pos
+  ge %minus_matched %minus_result 0
+  jif %minus_matched _return_minus
+  # No match
+  mov %result -1
+  ret %result
+_return_minus:
+  ret %minus_result
+_return_greater:
+  ret %greater_result
+_return_less:
+  ret %less_result
+_return_bang:
+  ret %bang_result
+_return_eq:
+  ret %eq_result
+_return_colon:
+  ret %colon_result
+
 # scan_token: Main token scanning entry point
 # Returns packed result: (kind << 16) | new_pos, or (EOF << 16) | pos at end
 @node scan_token
@@ -402,7 +610,7 @@ _not_matched:
   ne %at_end %check_end 0
   jif %at_end _eof
 
-  # Check for newline (TokenKind::Newline = 78)
+  # Check for newline (TokenKind::Newline = 77)
   call %ch peek source pos
   eq %is_newline %ch 10
   jif %is_newline _newline
@@ -412,14 +620,19 @@ _not_matched:
   ne %ws_bool %is_ws 0
   jif %ws_bool _skip_ws
 
+  # Try multi-char tokens first (::, =>, ==, !=, <=, >=)
+  call %multi_result scan_multi_char source pos
+  ge %multi_matched %multi_result 0
+  jif %multi_matched _return_multi
+
   # Try single-char token
   call %single_result scan_single_char_token source pos
   ge %single_matched %single_result 0
   jif %single_matched _return_single
 
-  # Not a single-char token - will be handled by other phases
-  # For now, return Error token and advance
-  mul %err_kind 105 65536
+  # Not a recognized token - will be handled by other phases
+  # For now, return Error token (80) and advance
+  mul %err_kind 80 65536
   add %new_pos pos 1
   add %result %err_kind %new_pos
   ret %result
@@ -430,10 +643,13 @@ _skip_ws:
   ret %result
 
 _newline:
-  mul %nl_kind 78 65536
+  mul %nl_kind 77 65536
   add %nl_pos pos 1
   add %result %nl_kind %nl_pos
   ret %result
+
+_return_multi:
+  ret %multi_result
 
 _return_single:
   ret %single_result
