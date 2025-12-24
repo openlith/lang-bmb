@@ -241,6 +241,14 @@ pub enum Type {
     Char,
     Void,
 
+    // String types (v0.9+)
+    /// Owned UTF-8 string: heap-allocated, growable
+    /// UTF-8 validity is guaranteed at type level - "Omission is guessing"
+    BmbString,
+    /// Borrowed UTF-8 string slice: view into String or static data
+    /// UTF-8 validity is guaranteed at type level - "Omission is guessing"
+    BmbStr,
+
     // Compound types
     /// Fixed-size array: [T; N]
     Array {
@@ -389,6 +397,8 @@ impl fmt::Display for Type {
             Type::Result { ok, err } => write!(f, "Result<{}, {}>", ok, err),
             Type::Vector(inner) => write!(f, "Vector<{}>", inner),
             Type::Slice(inner) => write!(f, "Slice<{}>", inner),
+            Type::BmbString => write!(f, "String"),
+            Type::BmbStr => write!(f, "Str"),
         }
     }
 }

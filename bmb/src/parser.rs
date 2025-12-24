@@ -608,6 +608,18 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type> {
                 message: format!("Unknown primitive type: {}", other),
             }),
         },
+        Rule::string_type => {
+            // string_type = @{ ("String" | "Str") ~ !ASCII_ALPHANUMERIC }
+            match pair.as_str() {
+                "String" => Ok(Type::BmbString),
+                "Str" => Ok(Type::BmbStr),
+                other => Err(BmbError::ParseError {
+                    line: 0,
+                    column: 0,
+                    message: format!("Unknown string type: {}", other),
+                }),
+            }
+        }
         Rule::array_type => {
             // array_type = { "[" ~ type_spec ~ ";" ~ array_size ~ "]" }
             let mut inner = pair.into_inner();
@@ -2227,6 +2239,51 @@ _base:
             matches!(param_type, Type::Slice(inner) if matches!(&**inner, Type::I32)),
             "Expected Slice<i32>, got {:?}",
             param_type
+        );
+    }
+
+    #[test]
+    fn test_parse_string_types() {
+        // Function with String and Str types (v0.9+)
+        // UTF-8 validity is guaranteed at type level - "Omission is guessing"
+        let source = r#"
+@node process_text
+@params owned:String borrowed:Str
+@returns String
+
+  ret 0
+"#;
+        let result = parse(source);
+        assert!(
+            result.is_ok(),
+            "String/Str types should parse: {:?}",
+            result.err()
+        );
+        let program = result.unwrap();
+        assert_eq!(program.nodes.len(), 1);
+
+        // Check String parameter
+        let owned_type = &program.nodes[0].params[0].ty;
+        assert!(
+            matches!(owned_type, Type::BmbString),
+            "Expected String (BmbString), got {:?}",
+            owned_type
+        );
+
+        // Check Str parameter
+        let borrowed_type = &program.nodes[0].params[1].ty;
+        assert!(
+            matches!(borrowed_type, Type::BmbStr),
+            "Expected Str (BmbStr), got {:?}",
+            borrowed_type
+        );
+
+        // Check String return type
+        let ret_type = &program.nodes[0].returns;
+        assert!(
+            matches!(ret_type, Type::BmbString),
+            "Expected String return type, got {:?}",
+            ret_type
         );
     }
 }

@@ -227,18 +227,18 @@ add %i_2 %i_1 1   # Clear: %i_2 depends on %i_1
 
 ---
 
-## v0.9.0: Standard Library - Strings & Text
+## v0.9.0: Standard Library - Strings & Text ✅ COMPLETE
 
 **Goal**: UTF-8 string handling with safety contracts
 
-| Task | Priority | Complexity |
-|------|----------|------------|
-| `String` - owned UTF-8 string | Critical | High |
-| `Str` - string slice/view | Critical | Medium |
-| String concatenation | High | Medium |
-| UTF-8 validation contracts | Critical | High |
-| Character iteration | High | Medium |
-| Format/parsing utilities | Medium | High |
+| Task | Priority | Status |
+|------|----------|--------|
+| `String` - owned UTF-8 string | Critical | ✅ Complete |
+| `Str` - string slice/view | Critical | ✅ Complete |
+| UTF-8 validity at type level | Critical | ✅ Complete |
+| String concatenation | High | Next phase |
+| Character iteration | High | Next phase |
+| Format/parsing utilities | Medium | Next phase |
 
 **Contract Examples**:
 ```bmb

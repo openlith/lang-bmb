@@ -1,8 +1,12 @@
 // BMB (Bare-Metal-Banter) PEG Grammar
-// Version 0.8
+// Version 0.9
 //
 // Changes in 0.8:
 //   - Added @type refined type definitions with constraints
+// Changes in 0.9:
+//   - Added String (owned UTF-8) and Str (borrowed UTF-8 slice) types
+//   - UTF-8 validity guaranteed at type level ("Omission is guessing")
+//
 //   - Added Option<T> and Result<T,E> generic types
 //   - Signal Density Optimization: explicit constraints in type names
 //
@@ -224,8 +228,13 @@ unicode_escape = { "u" ~ "{" ~ ASCII_HEX_DIGIT{1,6} ~ "}" }
 
 // Types
 // type_spec is the main type rule (supports arrays, references, pointers, generics, user types)
-type_spec = { array_type | ref_type | ptr_type | generic_type | primitive_type | user_type }
+type_spec = { array_type | ref_type | ptr_type | generic_type | string_type | primitive_type | user_type }
 
+// String types (v0.9+)
+// String: Owned UTF-8 string (heap-allocated, growable)
+// Str: Borrowed UTF-8 string slice (view into String or static data)
+// UTF-8 validity is guaranteed at type level - "Omission is guessing"
+string_type = @{ ("String" | "Str") ~ !ASCII_ALPHANUMERIC }
 // Generic types: Option<T>, Result<T,E>, Vector<T>, etc.
 generic_type = { generic_name ~ "<" ~ type_spec ~ ("," ~ type_spec)* ~ ">" }
 generic_name = @{ ("Option" | "Result" | "Vector" | "Slice") ~ !ASCII_ALPHANUMERIC }

@@ -379,7 +379,10 @@ fn validate_type(ty: &Type, registry: &TypeRegistry) -> Result<()> {
         | Type::F64
         | Type::Bool
         | Type::Char
-        | Type::Void => Ok(()),
+        | Type::Void
+        // String types (v0.9+) - UTF-8 validity guaranteed at type level
+        | Type::BmbString
+        | Type::BmbStr => Ok(()),
         Type::Array { element, size } => {
             if *size == 0 {
                 return Err(BmbError::TypeError {

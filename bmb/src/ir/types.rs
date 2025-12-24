@@ -115,6 +115,8 @@ impl From<&Type> for IrType {
 
             // Generic built-in types - represented as i32 pointers in WASM32
             Type::Option(_) | Type::Result { .. } | Type::Vector(_) | Type::Slice(_) => IrType::I32,
+            // String types (v0.9+) - represented as pointers
+            Type::BmbString | Type::BmbStr => IrType::I32,
         }
     }
 }

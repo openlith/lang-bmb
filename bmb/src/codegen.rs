@@ -113,7 +113,10 @@ fn type_size_align(ty: &Type) -> (u32, u32) {
         }
         // Vector and Slice are represented as pointers in WASM32
         Type::Vector(_) => (4, 4), // Pointer to heap allocation
-        Type::Slice(_) => (8, 4),  // Pointer + length (fat pointer)
+        Type::Slice(_) => (8, 4),
+        // String types (v0.9+) - UTF-8 strings are fat pointers
+        Type::BmbString => (12, 4), // ptr(4) + len(4) + cap(4) on WASM32
+        Type::BmbStr => (8, 4),     // ptr(4) + len(4) - borrowed slice  // Pointer + length (fat pointer)
     }
 }
 
@@ -1288,7 +1291,9 @@ fn type_to_valtype(ty: &Type) -> ValType {
         Type::Option(_) => ValType::I32,    // Option tag+value (stack allocated for small types)
         Type::Result { .. } => ValType::I32, // Result tag+value (stack allocated for small types)
         Type::Vector(_) => ValType::I32,    // Vector pointer to heap
-        Type::Slice(_) => ValType::I32,     // Slice pointer (fat pointer, but simplified for now)
+        Type::Slice(_) => ValType::I32,
+        // String types (v0.9+) - represented as i32 pointers in WASM
+        Type::BmbString | Type::BmbStr => ValType::I32,     // Slice pointer (fat pointer, but simplified for now)
     }
 }
 

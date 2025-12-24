@@ -745,6 +745,8 @@ pub fn type_to_valtype(ty: &Type) -> ValType {
         | Type::Result { .. }
         | Type::Vector(_)
         | Type::Slice(_) => ValType::I32,
+        // String types (v0.9+) - represented as i32 pointers
+        | Type::BmbString | Type::BmbStr => ValType::I32,
     }
 }
 
