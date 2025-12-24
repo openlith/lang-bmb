@@ -1058,6 +1058,57 @@ _unclosed:
   mov %result -1
   ret %result
 
+# ============================================
+# Comment Scanning
+# ============================================
+
+# scan_comment: Scan # comment to end of line
+# Returns packed (kind << 16) | new_pos, or -1
+# Comment = 78
+@node scan_comment
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post true
+  call %ch peek source pos
+  # Check for '#' (35)
+  ne %not_hash %ch 35
+  jif %not_hash _not_matched
+
+  # Scan to end of line or EOF
+  add %content_start pos 1
+  call %end_pos scan_to_eol source %content_start
+  # Comment = 78
+  mul %kind 78 65536
+  add %result %kind %end_pos
+  ret %result
+
+_not_matched:
+  mov %result -1
+  ret %result
+
+# scan_to_eol: Scan to end of line, return position of newline or EOF
+@node scan_to_eol
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= pos
+  call %at_end is_at_end source pos
+  ne %is_end %at_end 0
+  jif %is_end _done
+
+  call %ch peek source pos
+  # Stop at newline (10)
+  eq %is_newline %ch 10
+  jif %is_newline _done
+
+  add %next_pos pos 1
+  call %result scan_to_eol source %next_pos
+  ret %result
+
+_done:
+  ret pos
+
 # scan_token: Main token scanning entry point
 # Returns packed result: (kind << 16) | new_pos, or (EOF << 16) | pos at end
 @node scan_token
@@ -1079,6 +1130,11 @@ _unclosed:
   xcall %is_ws is_whitespace %ch
   ne %ws_bool %is_ws 0
   jif %ws_bool _skip_ws
+
+  # Try comment (# to end of line)
+  call %comment_result scan_comment source pos
+  ge %comment_matched %comment_result 0
+  jif %comment_matched _return_comment
 
   # Try string literal first (before other tokens)
   call %str_result scan_string_literal source pos
@@ -1131,6 +1187,9 @@ _newline:
   add %nl_pos pos 1
   add %result %nl_kind %nl_pos
   ret %result
+
+_return_comment:
+  ret %comment_result
 
 _return_str:
   ret %str_result
