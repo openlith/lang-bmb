@@ -4962,3 +4962,32 @@ _digit:
     println!("   - Token type identification: ✓");
     println!("   - Number parsing: ✓");
 }
+
+#[test]
+fn test_self_hosting_lexer_compilation() {
+    // Test that the v0.16.0 self-hosting lexer compiles successfully
+    // This verifies the lexer.bmb and token.bmb files are valid BMB code.
+
+    // Read the token.bmb file
+    let token_source = std::fs::read_to_string("compiler/token.bmb")
+        .expect("Failed to read compiler/token.bmb");
+    let token_ast = parser::parse(&token_source).expect("token.bmb parsing failed");
+    let token_typed = types::typecheck(&token_ast).expect("token.bmb type checking failed");
+    let token_verified = contracts::verify(&token_typed).expect("token.bmb contract verification failed");
+    let token_wasm = codegen::generate(&token_verified).expect("token.bmb code generation failed");
+
+    println!("✅ token.bmb compiled successfully ({} bytes)", token_wasm.len());
+
+    // Read the lexer.bmb file
+    let lexer_source = std::fs::read_to_string("compiler/lexer.bmb")
+        .expect("Failed to read compiler/lexer.bmb");
+    let lexer_ast = parser::parse(&lexer_source).expect("lexer.bmb parsing failed");
+    let lexer_typed = types::typecheck(&lexer_ast).expect("lexer.bmb type checking failed");
+    let lexer_verified = contracts::verify(&lexer_typed).expect("lexer.bmb contract verification failed");
+    let lexer_wasm = codegen::generate(&lexer_verified).expect("lexer.bmb code generation failed");
+
+    println!("✅ lexer.bmb compiled successfully ({} bytes)", lexer_wasm.len());
+    println!("\n🎉 v0.16.0 Self-Hosting Lexer Foundation: READY");
+    println!("   - token.bmb: TokenKind enum, Token struct");
+    println!("   - lexer.bmb: Character utilities, token scanning");
+}
