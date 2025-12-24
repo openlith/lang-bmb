@@ -807,23 +807,195 @@ impl Identifier {
     }
 }
 
-/// Source location span
+/// Source location span with support for multi-line spans (v0.13+)
+///
+/// Enhanced for self-hosting preparation:
+/// - Tracks both start and end positions (line:column)
+/// - Supports span merging for compound AST nodes
+/// - File ID for multi-file compilation (0 = single file mode)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Span {
+    /// Byte offset of span start in source
     pub start: usize,
+    /// Byte offset of span end in source
     pub end: usize,
+    /// Start line number (1-indexed)
     pub line: usize,
+    /// Start column number (1-indexed)
     pub column: usize,
+    /// End line number (1-indexed), defaults to start line
+    pub end_line: usize,
+    /// End column number (1-indexed), defaults to column + (end - start)
+    pub end_column: usize,
+    /// File ID for multi-file compilation (0 = single file/stdin)
+    pub file_id: u32,
 }
 
 impl Span {
+    /// Create a new span (single-line compatible)
     pub fn new(start: usize, end: usize, line: usize, column: usize) -> Self {
+        let len = end.saturating_sub(start);
         Self {
             start,
             end,
             line,
             column,
+            end_line: line,
+            end_column: column + len,
+            file_id: 0,
         }
+    }
+
+    /// Create a multi-line span
+    pub fn multi_line(
+        start: usize,
+        end: usize,
+        line: usize,
+        column: usize,
+        end_line: usize,
+        end_column: usize,
+    ) -> Self {
+        Self {
+            start,
+            end,
+            line,
+            column,
+            end_line,
+            end_column,
+            file_id: 0,
+        }
+    }
+
+    /// Set file ID for multi-file compilation
+    pub fn with_file(mut self, file_id: u32) -> Self {
+        self.file_id = file_id;
+        self
+    }
+
+    /// Merge two spans into one that covers both (for compound AST nodes)
+    pub fn merge(&self, other: &Span) -> Self {
+        let (start, line, column) = if self.start <= other.start {
+            (self.start, self.line, self.column)
+        } else {
+            (other.start, other.line, other.column)
+        };
+        let (end, end_line, end_column) = if self.end >= other.end {
+            (self.end, self.end_line, self.end_column)
+        } else {
+            (other.end, other.end_line, other.end_column)
+        };
+        Self {
+            start,
+            end,
+            line,
+            column,
+            end_line,
+            end_column,
+            file_id: self.file_id,
+        }
+    }
+
+    /// Check if this span is within a single line
+    pub fn is_single_line(&self) -> bool {
+        self.line == self.end_line
+    }
+
+    /// Get the span length in bytes
+    pub fn len(&self) -> usize {
+        self.end.saturating_sub(self.start)
+    }
+
+    /// Check if span is empty (zero length)
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
+}
+
+/// Source file information for multi-file compilation (v0.13+)
+///
+/// Tracks file metadata for error reporting with source context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceFile {
+    /// Unique file ID (matches Span.file_id)
+    pub id: u32,
+    /// File path or name
+    pub name: String,
+    /// File content (stored for error context display)
+    pub content: String,
+    /// Line start byte offsets for efficient line lookup
+    pub line_offsets: Vec<usize>,
+}
+
+impl SourceFile {
+    /// Create a new source file
+    pub fn new(id: u32, name: impl Into<String>, content: impl Into<String>) -> Self {
+        let content = content.into();
+        let line_offsets = Self::compute_line_offsets(&content);
+        Self {
+            id,
+            name: name.into(),
+            content,
+            line_offsets,
+        }
+    }
+
+    /// Compute line start byte offsets
+    fn compute_line_offsets(content: &str) -> Vec<usize> {
+        let mut offsets = vec![0]; // Line 1 starts at byte 0
+        for (i, c) in content.char_indices() {
+            if c == '\n' {
+                offsets.push(i + 1);
+            }
+        }
+        offsets
+    }
+
+    /// Get line content by line number (1-indexed)
+    pub fn get_line(&self, line: usize) -> Option<&str> {
+        if line == 0 || line > self.line_offsets.len() {
+            return None;
+        }
+        let start = self.line_offsets[line - 1];
+        let end = self.line_offsets.get(line).copied().unwrap_or(self.content.len());
+        // Trim trailing newline
+        let line_content = &self.content[start..end];
+        Some(line_content.trim_end_matches('\n').trim_end_matches('\r'))
+    }
+
+    /// Get source snippet for a span with context lines
+    pub fn get_snippet(&self, span: &Span, context_lines: usize) -> String {
+        let start_line = span.line.saturating_sub(context_lines).max(1);
+        let end_line = (span.end_line + context_lines).min(self.line_offsets.len());
+
+        let mut result = String::new();
+        for line_num in start_line..=end_line {
+            if let Some(line_content) = self.get_line(line_num) {
+                let prefix = if line_num >= span.line && line_num <= span.end_line {
+                    ">"
+                } else {
+                    " "
+                };
+                result.push_str(&format!("{} {:4} | {}\n", prefix, line_num, line_content));
+
+                // Add caret line for error location
+                if line_num == span.line {
+                    let padding = " ".repeat(span.column.saturating_sub(1));
+                    let caret_len = if span.is_single_line() {
+                        span.end_column.saturating_sub(span.column).max(1)
+                    } else {
+                        line_content.len().saturating_sub(span.column.saturating_sub(1)).max(1)
+                    };
+                    let carets = "^".repeat(caret_len);
+                    result.push_str(&format!("       | {}{}\n", padding, carets));
+                }
+            }
+        }
+        result
+    }
+
+    /// Total number of lines in the file
+    pub fn line_count(&self) -> usize {
+        self.line_offsets.len()
     }
 }
 
@@ -841,5 +1013,67 @@ mod tests {
     fn test_opcode_display() {
         assert_eq!(Opcode::Add.to_string(), "add");
         assert_eq!(Opcode::Jif.to_string(), "jif");
+    }
+
+    #[test]
+    fn test_span_new() {
+        let span = Span::new(10, 20, 5, 3);
+        assert_eq!(span.start, 10);
+        assert_eq!(span.end, 20);
+        assert_eq!(span.line, 5);
+        assert_eq!(span.column, 3);
+        assert_eq!(span.end_line, 5);
+        assert_eq!(span.end_column, 13);
+        assert_eq!(span.file_id, 0);
+    }
+
+    #[test]
+    fn test_span_multi_line() {
+        let span = Span::multi_line(0, 50, 1, 1, 3, 10);
+        assert_eq!(span.line, 1);
+        assert_eq!(span.end_line, 3);
+        assert_eq!(span.end_column, 10);
+        assert!(!span.is_single_line());
+    }
+
+    #[test]
+    fn test_span_merge() {
+        let span1 = Span::new(0, 10, 1, 1);
+        let span2 = Span::new(20, 30, 2, 5);
+        let merged = span1.merge(&span2);
+        assert_eq!(merged.start, 0);
+        assert_eq!(merged.end, 30);
+        assert_eq!(merged.line, 1);
+        assert_eq!(merged.end_line, 2);
+    }
+
+    #[test]
+    fn test_span_len() {
+        let span = Span::new(10, 25, 1, 1);
+        assert_eq!(span.len(), 15);
+        assert!(!span.is_empty());
+        let empty = Span::new(10, 10, 1, 1);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_source_file_basic() {
+        let source = SourceFile::new(0, "test.bmb", "line 1\nline 2\nline 3");
+        assert_eq!(source.line_count(), 3);
+        assert_eq!(source.get_line(1), Some("line 1"));
+        assert_eq!(source.get_line(2), Some("line 2"));
+        assert_eq!(source.get_line(3), Some("line 3"));
+        assert_eq!(source.get_line(0), None);
+        assert_eq!(source.get_line(4), None);
+    }
+
+    #[test]
+    fn test_source_file_snippet() {
+        let source = SourceFile::new(0, "test.bmb", "@node foo\n@params x:i32\n@returns i32\n  ret %x");
+        let span = Span::new(10, 22, 2, 1);
+        let snippet = source.get_snippet(&span, 1);
+        assert!(snippet.contains("@node foo"));
+        assert!(snippet.contains("@params x:i32"));
+        assert!(snippet.contains("^"));
     }
 }
