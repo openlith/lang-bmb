@@ -346,6 +346,103 @@ _at:
 # ============================================
 
 # ============================================
+# Position Tracking Utilities
+# ============================================
+
+# count_newlines_before: Count newlines in source before position
+# Returns line number (1-based)
+@node count_newlines_before
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= 1
+  call %count count_newlines_in_range source 0 pos
+  add %line %count 1
+  ret %line
+
+# count_newlines_in_range: Count newlines between start and end positions
+@node count_newlines_in_range
+@params source:i32 start:i32 end:i32
+@returns i32
+@pre start >= 0
+@pre end >= start
+@post ret >= 0
+  ge %done start end
+  jif %done _zero
+  xcall %byte string_get_byte source start
+  eq %is_newline %byte 10
+  add %next start 1
+  call %rest count_newlines_in_range source %next end
+  jif %is_newline _add_one
+  ret %rest
+_add_one:
+  add %total %rest 1
+  ret %total
+_zero:
+  mov %result 0
+  ret %result
+
+# find_line_start: Find position of start of line containing pos
+# Returns byte position of line start
+@node find_line_start
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= 0
+  eq %at_start pos 0
+  jif %at_start _found
+  sub %prev pos 1
+  xcall %byte string_get_byte source %prev
+  eq %is_newline %byte 10
+  jif %is_newline _found
+  call %result find_line_start source %prev
+  ret %result
+_found:
+  ret pos
+
+# get_column: Get 1-based column number for position
+@node get_column
+@params source:i32 pos:i32
+@returns i32
+@pre pos >= 0
+@post ret >= 1
+  call %line_start find_line_start source pos
+  sub %col pos %line_start
+  add %result %col 1
+  ret %result
+
+# make_span: Create packed span (start_pos, end_pos as separate values)
+# For now, we just track positions. Line/column can be computed on demand.
+# Span packing: (start << 16) | length (max 65535 bytes per token)
+@node make_span
+@params start:i32 len:i32
+@returns i32
+@pre start >= 0
+@pre len >= 0
+@post ret >= 0
+  mul %start_shifted start 65536
+  add %result %start_shifted len
+  ret %result
+
+# unpack_span_start: Extract start position from packed span
+@node unpack_span_start
+@params span:i32
+@returns i32
+@pre span >= 0
+@post ret >= 0
+  div %start span 65536
+  ret %start
+
+# unpack_span_len: Extract length from packed span
+@node unpack_span_len
+@params span:i32
+@returns i32
+@pre span >= 0
+@post ret >= 0
+  mod %len span 65536
+  ret %len
+
+# ============================================
 # Token Scanning
 # ============================================
 
