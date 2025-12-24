@@ -3449,3 +3449,226 @@ fn test_stdlib_multiple_vectors() {
     let result = test_fn.call(&mut store, ()).expect("call failed");
     assert_eq!(result, 32, "Should return 3*10 + 2 = 32");
 }
+
+// =============================================================================
+// v0.15.5: Enum Data Construction Tests
+// =============================================================================
+
+#[test]
+fn test_enum_variant_constructor_parsing() {
+    // v0.15.5: Test parsing of enum variant constructor syntax
+    // Variant constructors now return the proper enum type
+    let source = r#"
+@enum Result
+  Ok: i32
+  Err: i32
+
+@node create_ok
+@params value:i32
+@returns Result
+  # Create Result::Ok(value) - returns Result enum type
+  mov %result Result::Ok(value)
+  ret %result
+"#;
+
+    // Just verify parsing and type checking works
+    let ast = parser::parse(source).expect("parsing failed");
+    let typed = types::typecheck(&ast).expect("type checking failed");
+    let _verified = contracts::verify(&typed).expect("contract verification failed");
+    // Success if we get here without errors
+}
+
+#[test]
+fn test_enum_variant_constructor_codegen() {
+    // v0.15.5: Test code generation for enum variant construction
+    // Enum with payload uses i64 packed representation internally,
+    // but the type system tracks it as the enum type
+    let source = r#"
+@enum Token
+  Number: i32
+  Plus: i32
+  Eof: i32
+
+@node create_number
+@params value:i32
+@returns Token
+  # Create Token::Number(value) - returns Token enum type
+  mov %tok Token::Number(value)
+  ret %tok
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    // Token is represented as i64 at runtime (packed representation)
+    let create_number = instance
+        .get_typed_func::<i32, i64>(&mut store, "create_number")
+        .expect("create_number function not found");
+
+    // Token::Number is variant 0, so packed value = (0 << 32) | 42 = 42
+    let result = create_number.call(&mut store, 42).unwrap();
+    assert_eq!(result & 0xFFFFFFFF, 42, "Low 32 bits should be payload (42)");
+    assert_eq!(result >> 32, 0, "High 32 bits should be discriminant (0 for Number)");
+
+    // Test with different value
+    let result = create_number.call(&mut store, 123).unwrap();
+    assert_eq!(result & 0xFFFFFFFF, 123, "Low 32 bits should be payload (123)");
+    assert_eq!(result >> 32, 0, "High 32 bits should be discriminant (0 for Number)");
+}
+
+#[test]
+fn test_pattern_matching_with_binding() {
+    // v0.15.5: Test pattern matching with payload extraction
+    // "Omission is guessing, and guessing is error."
+    // - Pattern binding makes payload extraction explicit
+    // All variants have i32 payload for uniform packed representation
+    let source = r#"
+@enum Token
+  Number: i32
+  Plus: i32
+  Eof: i32
+
+@node extract_number
+@params tok:Token
+@returns i32
+@pre true
+@post true
+  # Match on the token and extract the payload if it's a Number
+  @match %tok
+    @case Token::Number(%n):
+      ret %n
+    @case Token::Plus(%_):
+      ret -1
+    @case Token::Eof(%_):
+      ret -2
+
+@node make_number
+@params n:i32
+@returns Token
+  mov %tok Token::Number(n)
+  ret %tok
+
+@node make_plus
+@params
+@returns Token
+  # Plus token carries no meaningful payload, use 0
+  mov %tok Token::Plus(0)
+  ret %tok
+
+@node make_eof
+@params
+@returns Token
+  # Eof token carries no meaningful payload, use 0
+  mov %tok Token::Eof(0)
+  ret %tok
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let make_number = instance
+        .get_typed_func::<i32, i64>(&mut store, "make_number")
+        .expect("make_number function not found");
+
+    let extract_number = instance
+        .get_typed_func::<i64, i32>(&mut store, "extract_number")
+        .expect("extract_number function not found");
+
+    let make_plus = instance
+        .get_typed_func::<(), i64>(&mut store, "make_plus")
+        .expect("make_plus function not found");
+
+    let make_eof = instance
+        .get_typed_func::<(), i64>(&mut store, "make_eof")
+        .expect("make_eof function not found");
+
+    // Round-trip test: create Token::Number(42), then extract it
+    let token_42 = make_number.call(&mut store, 42).unwrap();
+    let result = extract_number.call(&mut store, token_42).unwrap();
+    assert_eq!(result, 42, "Should extract payload 42 from Token::Number");
+
+    // Create and extract Token::Number(100)
+    let token_100 = make_number.call(&mut store, 100).unwrap();
+    let result = extract_number.call(&mut store, token_100).unwrap();
+    assert_eq!(result, 100, "Should extract payload 100 from Token::Number");
+
+    // Token::Plus should return -1
+    let token_plus = make_plus.call(&mut store, ()).unwrap();
+    let result = extract_number.call(&mut store, token_plus).unwrap();
+    assert_eq!(result, -1, "Token::Plus should return -1");
+
+    // Token::Eof should return -2
+    let token_eof = make_eof.call(&mut store, ()).unwrap();
+    let result = extract_number.call(&mut store, token_eof).unwrap();
+    assert_eq!(result, -2, "Token::Eof should return -2");
+}
+
+#[test]
+fn test_pattern_matching_bidirectional() {
+    // v0.15.5: Test complete round-trip: construct → match → extract
+    let source = r#"
+@enum Result
+  Ok: i32
+  Err: i32
+
+@node wrap_ok
+@params value:i32
+@returns Result
+  mov %r Result::Ok(value)
+  ret %r
+
+@node wrap_err
+@params code:i32
+@returns Result
+  mov %r Result::Err(code)
+  ret %r
+
+@node unwrap_or
+@params result:Result default:i32
+@returns i32
+@pre true
+@post true
+  @match %result
+    @case Result::Ok(%val):
+      ret %val
+    @case Result::Err(%_err):
+      ret default
+"#;
+
+    let wasm = compile_bmb(source);
+
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm).expect("module creation failed");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).expect("instantiation failed");
+
+    let wrap_ok = instance
+        .get_typed_func::<i32, i64>(&mut store, "wrap_ok")
+        .expect("wrap_ok function not found");
+
+    let wrap_err = instance
+        .get_typed_func::<i32, i64>(&mut store, "wrap_err")
+        .expect("wrap_err function not found");
+
+    let unwrap_or = instance
+        .get_typed_func::<(i64, i32), i32>(&mut store, "unwrap_or")
+        .expect("unwrap_or function not found");
+
+    // Round-trip test: wrap value in Ok, then unwrap it
+    let ok_42 = wrap_ok.call(&mut store, 42).unwrap();
+    let result = unwrap_or.call(&mut store, (ok_42, 0)).unwrap();
+    assert_eq!(result, 42, "unwrap_or(Ok(42), 0) should return 42");
+
+    // Test with Err
+    let err_999 = wrap_err.call(&mut store, 999).unwrap();
+    let result = unwrap_or.call(&mut store, (err_999, -100)).unwrap();
+    assert_eq!(result, -100, "unwrap_or(Err(_), -100) should return default -100");
+}

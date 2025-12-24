@@ -309,9 +309,14 @@ opcode = @{
 }
 
 // Operands
+// variant_constructor must come before qualified_ident to match Enum::Variant(value)
 // qualified_ident must come before ident to match module.function patterns
 // ident must NOT match opcode keywords (box, unbox, drop, etc.) - use negative lookahead
-operand = { register | label_ref | str_literal | char_literal | float_literal | int_literal | field_access | array_access | qualified_ident | (!opcode ~ ident) }
+operand = { register | label_ref | str_literal | char_literal | float_literal | int_literal | field_access | array_access | variant_constructor | qualified_ident | (!opcode ~ ident) }
+
+// Variant constructor: EnumName::Variant(value) for enums with payload
+variant_constructor = { ident ~ "::" ~ ident ~ "(" ~ variant_arg ~ ")" }
+variant_arg = { register | int_literal | str_literal | char_literal | ident }
 
 // Qualified identifier for module references: module.function
 qualified_ident = { ident ~ "::" ~ ident }

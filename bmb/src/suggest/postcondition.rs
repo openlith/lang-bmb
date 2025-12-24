@@ -399,6 +399,18 @@ fn operand_to_expr(operand: &Operand, state: &SymbolicState) -> Expr {
                 span: base.span.clone(),
             })
         }
+        Operand::VariantConstructor {
+            enum_name,
+            variant_name,
+            payload,
+        } => {
+            // Simplified: represent as the variant construction
+            let payload_str = operand_to_string(payload);
+            Expr::Var(Identifier {
+                name: format!("{}::{}({})", enum_name.name, variant_name.name, payload_str),
+                span: enum_name.span.clone(),
+            })
+        }
     }
 }
 
@@ -416,6 +428,16 @@ fn operand_to_string(operand: &Operand) -> String {
             format!("{}[{}]", base.name, operand_to_string(index))
         }
         Operand::FieldAccess { base, field } => format!("{}.{}", base.name, field.name),
+        Operand::VariantConstructor {
+            enum_name,
+            variant_name,
+            payload,
+        } => format!(
+            "{}::{}({})",
+            enum_name.name,
+            variant_name.name,
+            operand_to_string(payload)
+        ),
     }
 }
 

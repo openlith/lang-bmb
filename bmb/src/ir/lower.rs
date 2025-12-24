@@ -400,6 +400,25 @@ impl IrLowerer {
                 // Return a temp for the result
                 self.next_temp()
             }
+            Operand::VariantConstructor {
+                enum_name,
+                variant_name,
+                payload,
+            } => {
+                // Variant constructor: pack discriminant and payload into i64
+                // This is a simplified implementation; real codegen is in codegen.rs
+                let temp = self.next_temp();
+                let _payload_reg = self.lower_operand(payload, body);
+                // For IR, just create a placeholder constant
+                // The actual packing happens in codegen
+                body.push(IrInst::MovConst {
+                    dest: temp.clone(),
+                    value: IrConst::I64(0), // Placeholder
+                });
+                // Note: The real variant construction is handled in WASM codegen
+                let _ = (enum_name, variant_name); // Suppress unused warnings
+                temp
+            }
         }
     }
 
@@ -462,6 +481,19 @@ impl IrLowerer {
                 let _base_name = base.name.trim_start_matches('%');
                 let _index_reg = self.lower_operand(index, body);
                 // Placeholder: actual array access would generate load instruction
+            }
+            Operand::VariantConstructor {
+                enum_name,
+                variant_name,
+                payload,
+            } => {
+                // Variant constructor: lower payload and create placeholder
+                let _payload_reg = self.lower_operand(payload, body);
+                body.push(IrInst::MovConst {
+                    dest: dest.clone(),
+                    value: IrConst::I64(0), // Placeholder - actual codegen in WASM
+                });
+                let _ = (enum_name, variant_name); // Suppress unused warnings
             }
         }
     }

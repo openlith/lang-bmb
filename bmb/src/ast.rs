@@ -721,6 +721,12 @@ pub enum Operand {
         base: Identifier,
         index: Box<Operand>,
     },
+    /// Variant constructor: EnumName::Variant(value) for enums with data
+    VariantConstructor {
+        enum_name: Identifier,
+        variant_name: Identifier,
+        payload: Box<Operand>,
+    },
 }
 
 /// Index for array access

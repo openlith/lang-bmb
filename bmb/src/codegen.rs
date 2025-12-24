@@ -203,6 +203,36 @@ impl CodeGenerator {
         self.struct_layouts.get(name)
     }
 
+    /// Convert a Type to WASM ValType, with enum-aware representation
+    /// Enums with any variant having payload use i64 (packed representation)
+    /// Simple enums use i32 (discriminant only)
+    fn type_to_valtype_with_context(&self, ty: &Type) -> ValType {
+        match ty {
+            Type::Enum(name) => {
+                // Check if this enum has any variant with payload
+                if self.enum_has_payload(name) {
+                    ValType::I64 // Packed: discriminant << 32 | payload
+                } else {
+                    ValType::I32 // Simple: just discriminant
+                }
+            }
+            Type::Struct(name) => {
+                // Parser uses Type::Struct for all user-defined types
+                // Check if this is actually an enum
+                if self.enums.contains_key(name) {
+                    if self.enum_has_payload(name) {
+                        ValType::I64 // Packed: discriminant << 32 | payload
+                    } else {
+                        ValType::I32 // Simple: just discriminant
+                    }
+                } else {
+                    type_to_valtype(ty)
+                }
+            }
+            _ => type_to_valtype(ty),
+        }
+    }
+
     fn generate_program(&mut self, program: &crate::types::TypedProgram) -> Result<()> {
         // Phase 0: Calculate struct layouts from registry
         self.calculate_struct_layouts(&program.registry);
@@ -324,7 +354,7 @@ impl CodeGenerator {
         let params: Vec<ValType> = import
             .param_types
             .iter()
-            .map(|t| type_to_valtype(t))
+            .map(|t| self.type_to_valtype_with_context(t))
             .collect();
         // Imported functions (like print_i32) don't return values
         let results: Vec<ValType> = vec![];
@@ -341,12 +371,12 @@ impl CodeGenerator {
         let params: Vec<ValType> = extern_def
             .params
             .iter()
-            .map(|p| type_to_valtype(&p.ty))
+            .map(|p| self.type_to_valtype_with_context(&p.ty))
             .collect();
         // Extern functions have explicit return types (unlike legacy imports)
         let results: Vec<ValType> = match &extern_def.returns {
             crate::ast::Type::Void => vec![],
-            ty => vec![type_to_valtype(ty)],
+            ty => vec![self.type_to_valtype_with_context(ty)],
         };
 
         let type_idx = self.next_type_idx;
@@ -356,8 +386,8 @@ impl CodeGenerator {
     }
 
     fn register_function_type(&mut self, node: &Node) -> Result<u32> {
-        let params: Vec<ValType> = node.params.iter().map(|p| type_to_valtype(&p.ty)).collect();
-        let results = vec![type_to_valtype(&node.returns)];
+        let params: Vec<ValType> = node.params.iter().map(|p| self.type_to_valtype_with_context(&p.ty)).collect();
+        let results = vec![self.type_to_valtype_with_context(&node.returns)];
 
         let type_idx = self.next_type_idx;
         self.types.ty().function(params, results);
@@ -392,7 +422,7 @@ impl CodeGenerator {
             if !locals.contains_key(reg_name) {
                 let local_idx = param_count + local_types.len() as u32;
                 locals.insert(reg_name.clone(), local_idx);
-                local_types.push((1, type_to_valtype(reg_type)));
+                local_types.push((1, self.type_to_valtype_with_context(reg_type)));
             }
         }
 
@@ -404,7 +434,7 @@ impl CodeGenerator {
         let result_local = if !node.postconditions.is_empty() || !expanded.postconditions.is_empty()
         {
             let idx = param_count + local_types.len() as u32;
-            local_types.push((1, type_to_valtype(&node.returns)));
+            local_types.push((1, self.type_to_valtype_with_context(&node.returns)));
             Some(idx)
         } else {
             None
@@ -1550,6 +1580,30 @@ impl CodeGenerator {
             // If pattern matches, execute body and break
             func.instruction(&Instruction::If(BlockType::Empty));
 
+            // Extract binding if present (for enum variants with payload)
+            if let crate::ast::Pattern::Variant {
+                enum_name,
+                binding: Some(ref bind_name),
+                ..
+            } = &arm.pattern
+            {
+                // Only extract if this enum has payload variants
+                if self.enum_has_payload(&enum_name.name) {
+                    // Get binding local index
+                    if let Some(&bind_idx) = ctx.locals.get(bind_name) {
+                        // Load scrutinee (i64 packed: discriminant << 32 | payload)
+                        func.instruction(&Instruction::LocalGet(*scrutinee_idx));
+                        // Extract low 32 bits (payload)
+                        func.instruction(&Instruction::I64Const(0xFFFFFFFF));
+                        func.instruction(&Instruction::I64And);
+                        // Wrap to i32
+                        func.instruction(&Instruction::I32WrapI64);
+                        // Store in binding local
+                        func.instruction(&Instruction::LocalSet(bind_idx));
+                    }
+                }
+            }
+
             // Generate arm body (simplified - just statements, no nested match)
             for instruction in &arm.body {
                 match instruction {
@@ -1599,6 +1653,15 @@ impl CodeGenerator {
         Ok(())
     }
 
+    /// Check if an enum has any variant with payload data
+    /// Returns true if any variant has a payload type
+    fn enum_has_payload(&self, enum_name: &str) -> bool {
+        self.enums
+            .get(enum_name)
+            .map(|e| e.variants.iter().any(|v| v.payload.is_some()))
+            .unwrap_or(false)
+    }
+
     /// Generate pattern comparison code
     /// Leaves 1 on stack if pattern matches, 0 otherwise
     fn generate_pattern_comparison(
@@ -1630,8 +1693,6 @@ impl CodeGenerator {
                 variant_name,
                 ..
             } => {
-                // For enums, compare discriminant (first word) with variant index
-                // Enum representation: discriminant is stored as i32
                 // Get variant index from enum definition
                 let variant_idx = self
                     .enums
@@ -1648,10 +1709,22 @@ impl CodeGenerator {
                         ),
                     })?;
 
-                // For simple enums (no payload), scrutinee IS the discriminant
-                // Compare with variant index
-                func.instruction(&Instruction::I32Const(variant_idx as i32));
-                func.instruction(&Instruction::I32Eq);
+                // Check if this enum has any variant with payload
+                if self.enum_has_payload(&enum_name.name) {
+                    // Enum with data: scrutinee is i64 (packed: discriminant << 32 | payload)
+                    // Extract discriminant from high 32 bits
+                    func.instruction(&Instruction::I64Const(32));
+                    func.instruction(&Instruction::I64ShrU);
+                    // Wrap to i32 for comparison
+                    func.instruction(&Instruction::I32WrapI64);
+                    // Compare with variant index
+                    func.instruction(&Instruction::I32Const(variant_idx as i32));
+                    func.instruction(&Instruction::I32Eq);
+                } else {
+                    // Simple enum (no payload): scrutinee IS the discriminant (i32)
+                    func.instruction(&Instruction::I32Const(variant_idx as i32));
+                    func.instruction(&Instruction::I32Eq);
+                }
             }
         }
 
@@ -1903,6 +1976,40 @@ impl CodeGenerator {
                         module.name, name.name
                     ),
                 });
+            }
+            Operand::VariantConstructor {
+                enum_name,
+                variant_name,
+                payload,
+            } => {
+                // Enum variant with data: pack discriminant and payload into i64
+                // Layout: high 32 bits = discriminant, low 32 bits = payload (for i32)
+                // This is a simple representation; more complex payloads need memory
+                let variant_idx = self
+                    .enums
+                    .get(&enum_name.name)
+                    .and_then(|e| {
+                        e.variants
+                            .iter()
+                            .position(|v| v.name.name == variant_name.name)
+                    })
+                    .ok_or_else(|| BmbError::CodegenError {
+                        message: format!(
+                            "Unknown enum variant: {}::{}",
+                            enum_name.name, variant_name.name
+                        ),
+                    })?;
+
+                // Generate payload value (must be i32 for this simple implementation)
+                self.generate_operand(payload, func, ctx)?;
+                // Extend i32 payload to i64
+                func.instruction(&Instruction::I64ExtendI32U);
+
+                // Push discriminant shifted left by 32 bits
+                func.instruction(&Instruction::I64Const((variant_idx as i64) << 32));
+
+                // OR them together: (discriminant << 32) | payload
+                func.instruction(&Instruction::I64Or);
             }
         }
 

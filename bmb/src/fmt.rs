@@ -113,6 +113,16 @@ fn format_operand(operand: &Operand) -> String {
             format!("{}[{}]", base.name, format_operand(index))
         }
         Operand::QualifiedIdent { module, name } => format!("{}::{}", module.name, name.name),
+        Operand::VariantConstructor {
+            enum_name,
+            variant_name,
+            payload,
+        } => format!(
+            "{}::{}({})",
+            enum_name.name,
+            variant_name.name,
+            format_operand(payload)
+        ),
     }
 }
 

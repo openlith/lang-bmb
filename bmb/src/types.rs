@@ -86,16 +86,21 @@ impl TypeRegistry {
         self.refined_types.get(name).map(|def| &def.constraint)
     }
 
-    /// Resolve a type to its underlying base type
-    /// For refined types (like nz_i32), returns the base type (i32)
-    /// For Type::Struct that names a refined type, returns the base type
-    /// For all other types, returns the type as-is
+    /// Resolve a type to its canonical form
+    /// - For refined types (like nz_i32), returns the base type (i32)
+    /// - For Type::Struct that names a refined type, returns the base type
+    /// - For Type::Struct that names an enum, returns Type::Enum
+    /// - For all other types, returns the type as-is
     pub fn resolve_type_to_base(&self, ty: &Type) -> Type {
         match ty {
             Type::Struct(name) => {
                 // Check if this is a refined type name
                 if let Some(base) = self.resolve_to_base_type(name) {
                     base.clone()
+                } else if self.enums.contains_key(name) {
+                    // This is actually an enum, not a struct
+                    // Parser uses Type::Struct for all user-defined types
+                    Type::Enum(name.clone())
                 } else {
                     ty.clone()
                 }
@@ -618,10 +623,9 @@ fn typecheck_node(node: &Node, global_env: &TypeEnv, registry: &TypeRegistry) ->
                         }
                     }
 
-                    // Remove bindings after arm (scope ends)
-                    if let Pattern::Variant { binding: Some(ref b), .. } = arm.pattern {
-                        env.registers.remove(b);
-                    }
+                    // Note: We keep bindings in register_types rather than removing them
+                    // because codegen needs locals allocated for all bindings.
+                    // Scoping is enforced by the pattern structure, not by removal.
                 }
 
                 // Type check default arm if present
@@ -1363,6 +1367,24 @@ fn get_operand_type(operand: &Operand, env: &TypeEnv, registry: &TypeRegistry) -
                         "Unknown function in module: {}::{}",
                         module.name, name.name
                     ),
+                })
+            }
+        }
+        Operand::VariantConstructor {
+            enum_name,
+            variant_name: _,
+            payload: _,
+        } => {
+            // Variant constructor creates an enum value
+            // The semantic type is the enum type, though runtime representation
+            // may be i64 for enums with payload (packed: discriminant << 32 | payload)
+            // or i32 for simple enums (just discriminant)
+            if registry.get_enum(&enum_name.name).is_some() {
+                // Preserve enum type for type checking (enables pattern matching)
+                Ok(Type::Enum(enum_name.name.clone()))
+            } else {
+                Err(BmbError::TypeError {
+                    message: format!("Unknown enum: {}", enum_name.name),
                 })
             }
         }

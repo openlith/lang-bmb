@@ -1282,6 +1282,25 @@ fn parse_operand(pair: pest::iterators::Pair<Rule>) -> Result<Operand> {
             let index = Box::new(parse_operand(index_pair)?);
             Ok(Operand::ArrayAccess { base, index })
         }
+        Rule::variant_constructor => {
+            // variant_constructor = { ident ~ "::" ~ ident ~ "(" ~ variant_arg ~ ")" }
+            let mut inner = pair.into_inner();
+            let enum_name = parse_identifier(inner.next().unwrap())?;
+            let variant_name = parse_identifier(inner.next().unwrap())?;
+            let payload_pair = inner.next().unwrap();
+            let payload = Box::new(parse_operand(payload_pair)?);
+            Ok(Operand::VariantConstructor {
+                enum_name,
+                variant_name,
+                payload,
+            })
+        }
+        Rule::variant_arg => {
+            // variant_arg = { register | int_literal | str_literal | char_literal | ident }
+            // Delegate to inner rule
+            let inner = pair.into_inner().next().unwrap();
+            parse_operand(inner)
+        }
         Rule::qualified_ident => {
             // qualified_ident = { ident ~ "::" ~ ident }
             let mut inner = pair.into_inner();
